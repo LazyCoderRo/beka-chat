@@ -18,6 +18,11 @@
     color: var(--color-vision);
 }
 
+.bk-tool-call--document_analysis {
+    border-color: rgba(251, 191, 36, 0.25);
+    color: rgb(251, 191, 36);
+}
+
 .bk-tool-call--web_search {
     border-color: rgba(56, 189, 248, 0.25);
     color: var(--color-web-search);

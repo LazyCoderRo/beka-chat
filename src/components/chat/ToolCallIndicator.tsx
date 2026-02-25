@@ -1,10 +1,11 @@
 import './ToolCallIndicator.css';
-import { Eye, Globe, Zap, CheckCircle2, AlertCircle, FileSearch, Database } from 'lucide-react';
+import { Eye, Globe, Zap, CheckCircle2, AlertCircle, FileSearch, Database, FileText } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import type { ToolCall } from '../../types';
 
 const ICONS = {
     vision_analysis: Eye,
+    document_analysis: FileText,
     web_search: Globe,
     deep_search: Zap,
     webpage_fetch: FileSearch,
@@ -13,6 +14,7 @@ const ICONS = {
 
 const LABELS = {
     vision_analysis: 'Analyzing image',
+    document_analysis: 'Analyzing document',
     web_search: 'Searching web',
     deep_search: 'Deep search',
     webpage_fetch: 'Fetching webpage',

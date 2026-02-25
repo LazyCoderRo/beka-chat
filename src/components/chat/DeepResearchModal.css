@@ -1,0 +1,18 @@
+.bk-deep-research-modal__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.bk-deep-research-modal__description {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  margin: 0;
+}
+
+.bk-deep-research-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}

@@ -24,13 +24,14 @@ export interface FileAttachment {
   size: number;
   url: string;       // object URL or remote URL
   preview?: string;  // thumbnail URL
-  dataUrl?: string;  // base64 data for LM Studio
+  dataUrl?: string;  // base64 data for LM Studio (images)
+  textContent?: string;  // text content for text/pdf files
 }
 
 // ─── Tool Calls ──────────────────────────────────────────────────────────────
 
 export type ToolCallStatus = 'pending' | 'running' | 'done' | 'error';
-export type ToolCallType = 'vision_analysis' | 'web_search' | 'deep_search' | 'webpage_fetch' | 'context_summarization';
+export type ToolCallType = 'vision_analysis' | 'document_analysis' | 'web_search' | 'deep_search' | 'webpage_fetch' | 'context_summarization';
 
 export interface ToolCall {
   id: string;

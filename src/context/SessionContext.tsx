@@ -70,6 +70,20 @@ function generateId() {
     return 'session-' + Date.now() + Math.random().toString(36).substr(2, 9);
 }
 
+// Strip large textContent from attachments before saving to database
+function stripTextContentForDB(session: ChatSession): ChatSession {
+    return {
+        ...session,
+        messages: session.messages.map(msg => ({
+            ...msg,
+            attachments: msg.attachments?.map(att => {
+                const { textContent, ...rest } = att;
+                return rest;
+            })
+        }))
+    };
+}
+
 export function SessionProvider({ children }: { children: ReactNode }) {
     const { isAuthenticated } = useAuth();
     const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -108,16 +122,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         if (!isAuthenticated || !activeSession || !isLoaded) return;
         const token = localStorage.getItem('token');
+        const sessionForDB = stripTextContentForDB(activeSession);
         fetch(`/api/sessions/${activeSession.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify(activeSession)
+            body: JSON.stringify(sessionForDB)
         }).catch(() => {
             // Ignore for now. If it's a new session, it might need POST.
             fetch(`/api/sessions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify(activeSession)
+                body: JSON.stringify(sessionForDB)
             }).catch(console.error);
         });
     }, [activeSession, isAuthenticated, isLoaded]);

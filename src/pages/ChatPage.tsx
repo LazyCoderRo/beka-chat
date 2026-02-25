@@ -1155,16 +1155,62 @@ export function ChatPage() {
             const lastAiMsg = previousMessages.filter(m => m.role === 'assistant').pop();
             const previous_response_id = (lastAiMsg as Message & { lmResponseId?: string })?.lmResponseId;
 
+            const hasImages = attachments.some(a => a.type === 'image');
+            const imageCount = attachments.filter(a => a.type === 'image').length;
+            const hasTextDocs = attachments.some(a => a.type === 'text' || a.type === 'pdf');
+            const textDocCount = attachments.filter(a => a.type === 'text' || a.type === 'pdf').length;
+            const textDocNames = attachments.filter(a => a.type === 'text' || a.type === 'pdf').map(a => a.name).join(', ');
+            
             const toolSystemInst = `
 You must preserve conversational context across turns.
 If the user says "that link", "that page", "this URL", or similar, resolve it from recent chat context before asking again.
 If one clear recent URL exists, use it directly and mention which URL you assumed.
 If multiple plausible URLs exist, ask a short clarification listing candidates.
 Never ask the user to resend a link when a usable one already exists in recent context.
+${hasImages ? `IMPORTANT: The user has uploaded ${imageCount} image${imageCount > 1 ? 's' : ''}. You must use the vision analysis tool to examine ${imageCount > 1 ? 'them' : 'it'}.` : ''}
+${hasTextDocs ? `IMPORTANT: The user has uploaded ${textDocCount} text document${textDocCount > 1 ? 's' : ''} (${textDocNames}). The document content is already available to you - analyze it directly based on the user's request.` : ''}
 You have access to a tool 'analyze_image(prompt)'. 
 If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("your prompt here")
-Images are available if the user uploaded them.
-`;
+`.trim();
+
+            // Prepare input with text documents content if present
+            let inputContent = effectiveContent;
+            if (hasTextDocs) {
+                const textDocs = attachments.filter(a => (a.type === 'text' || a.type === 'pdf') && a.textContent);
+                if (textDocs.length > 0) {
+                    // Show document analysis tool call
+                    const docToolId = `tc-doc-${Date.now()}`;
+                    updateAiMessage(targetSid, aiMsgId, {
+                        toolCalls: [{
+                            id: docToolId,
+                            type: 'document_analysis',
+                            status: 'running',
+                            label: `Analyzing ${textDocs.length} document${textDocs.length > 1 ? 's' : ''}`,
+                            progress: 50,
+                            startedAt: new Date().toISOString()
+                        }]
+                    });
+                    
+                    const docsContext = textDocs.map(doc => 
+                        `--- Document: ${doc.name} ---\n${doc.textContent}\n--- End of ${doc.name} ---`
+                    ).join('\n\n');
+                    inputContent = `${effectiveContent}\n\n${docsContext}`;
+                    
+                    // Mark as done after brief delay
+                    setTimeout(() => {
+                        updateAiMessage(targetSid, aiMsgId, {
+                            toolCalls: [{
+                                id: docToolId,
+                                type: 'document_analysis',
+                                status: 'done',
+                                label: `Document${textDocs.length > 1 ? 's' : ''} processed`,
+                                progress: 100,
+                                duration: 300
+                            }]
+                        });
+                    }, 300);
+                }
+            }
 
             const body: {
                 model: string;
@@ -1175,16 +1221,21 @@ Images are available if the user uploaded them.
                 previous_response_id?: string;
             } = {
                 model: config.defaultChatModelId || 'default',
-                input: effectiveContent,
+                input: inputContent,
                 stream: true,
                 system_prompt: toolSystemInst,
                 reasoning: config.reasoningLevel && config.reasoningLevel !== 'off' ? config.reasoningLevel : undefined,
             };
 
             if (previous_response_id) body.previous_response_id = previous_response_id;
-            if (attachments.some(a => a.type === 'image')) {
+            
+            // Only send images directly if the chat model supports vision
+            const chatModel = availableModels.find(m => m.id === config.defaultChatModelId);
+            const chatModelSupportsVision = chatModel?.capabilities.includes('vision');
+            
+            if (attachments.some(a => a.type === 'image') && chatModelSupportsVision) {
                 const inputArray: Array<{ type: 'text' | 'image'; content?: string; data_url?: string }> = [
-                    { type: 'text', content: effectiveContent }
+                    { type: 'text', content: inputContent }
                 ];
                 attachments.forEach(a => {
                     if (a.type === 'image' && a.dataUrl) {

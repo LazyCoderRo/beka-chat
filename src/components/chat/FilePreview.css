@@ -57,6 +57,18 @@
     color: var(--color-info);
 }
 
+.bk-file-preview__icon--pdf {
+    color: #ef4444; /* Red for PDF */
+}
+
+.bk-file-preview__icon--excel {
+    color: #22c55e; /* Green for Excel */
+}
+
+.bk-file-preview__icon--word {
+    color: #3b82f6; /* Blue for Word */
+}
+
 .bk-file-preview__icon--doc {
     color: var(--color-warning);
 }

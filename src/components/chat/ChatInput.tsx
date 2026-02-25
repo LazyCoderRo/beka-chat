@@ -6,12 +6,16 @@ import { ModelSelector } from '../layout/ModelSelector';
 import { ReasoningSelector } from '../layout/ReasoningSelector';
 import { useAIConfig } from '../../context/AIConfigContext';
 import { getRuleForModel } from '../../data/modelRules';
+import { parseDocument } from '../../utils/documentParser';
 import type { FileAttachment, SearchMode, AIModel, Message, MessageActionSuggestion } from '../../types';
 
-const ACCEPTED_TYPES = '.txt,.pdf,.jpg,.jpeg,.png,.webp';
+const ACCEPTED_TYPES = '.txt,.pdf,.xls,.xlsx,.jpg,.jpeg,.png,.webp';
 const MIME_MAP: Record<string, FileAttachment['type']> = {
     'image/jpeg': 'image', 'image/jpg': 'image', 'image/png': 'image', 'image/webp': 'image',
-    'application/pdf': 'pdf', 'text/plain': 'text',
+    'application/pdf': 'pdf',
+    'text/plain': 'text',
+    'application/vnd.ms-excel': 'text',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'text',
 };
 
 let fileIdCounter = 0;
@@ -20,6 +24,7 @@ async function buildAttachment(file: File): Promise<FileAttachment> {
     const type = MIME_MAP[file.type] ?? 'text';
     const url = URL.createObjectURL(file);
     let dataUrl: string | undefined;
+    let textContent: string | undefined;
 
     if (type === 'image') {
         dataUrl = await new Promise((resolve) => {
@@ -27,6 +32,14 @@ async function buildAttachment(file: File): Promise<FileAttachment> {
             reader.onloadend = () => resolve(reader.result as string);
             reader.readAsDataURL(file);
         });
+    } else if (type === 'text' || type === 'pdf') {
+        // Parse document content (PDF, Excel, text files)
+        try {
+            textContent = await parseDocument(file);
+        } catch (error) {
+            console.error('Error parsing document:', error);
+            textContent = `[Error parsing ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}]`;
+        }
     }
 
     return {
@@ -38,6 +51,7 @@ async function buildAttachment(file: File): Promise<FileAttachment> {
         url,
         preview: type === 'image' ? url : undefined,
         dataUrl,
+        textContent,
     };
 }
 
@@ -62,7 +76,6 @@ export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disab
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const [autoSend, setAutoSend] = useState(true);
-    const [isTranscribing, setIsTranscribing] = useState(false);
 
     const [historyIndex, setHistoryIndex] = useState(-1);
     const [historyValue, setHistoryValue] = useState('');
@@ -306,7 +319,7 @@ export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disab
                             className={`bk-chat-input__tool-btn bk-chat-input__tool-btn--deep ${searchMode === 'deep' ? 'active' : ''}`}
                             onClick={() => toggleSearch('deep')}
                             title="Deep search"
-                            disabled={disabled || isTranscribing}
+                            disabled={disabled}
                         >
                             <Zap size={17} />
                             <span className="bk-chat-input__tool-label">Deep</span>

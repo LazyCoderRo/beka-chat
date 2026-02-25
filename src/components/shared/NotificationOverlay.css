@@ -53,6 +53,35 @@
     font-size: var(--text-sm);
     color: var(--text-primary);
     margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.bk-notification-item__timer {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    font-weight: var(--weight-bold);
+    font-size: var(--text-xs);
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--border-default);
+    font-variant-numeric: tabular-nums;
+    min-width: 48px;
+}
+
+.bk-notification-item.warning .bk-notification-item__timer {
+    background: rgba(245, 158, 11, 0.1);
+    color: #f59e0b;
+    border-color: rgba(245, 158, 11, 0.3);
+}
+
+.bk-notification-item.non-dismissible {
+    border-left-width: 5px;
+    box-shadow: var(--shadow-xl), 0 0 0 1px rgba(245, 158, 11, 0.2);
 }
 
 .bk-notification-item__message {

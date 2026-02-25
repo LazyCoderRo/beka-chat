@@ -188,27 +188,39 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
                     status.forEach(s => {
                         newStates.set(s.id, s);
                         
-                        // Check for imminent unload (< 30s)
-                        if (s.remainingSeconds < 30 && s.remainingSeconds > 0 && !notifiedModelsRef.current.has(s.id)) {
+                        // Show notification for models with < 30s remaining
+                        if (s.remainingSeconds < 30 && s.remainingSeconds > 0) {
                             const model = availableModels.find(m => m.id === s.id);
                             const modelName = model?.name || s.id;
                             
+                            // Add or update notification with live timer
                             addNotification({
                                 id: `unload-${s.id}`,
-                                title: 'Model Auto-Unload',
-                                message: `${modelName} will be unloaded in ${Math.round(s.remainingSeconds)} seconds due to inactivity.`,
-                                type: 'warning'
+                                title: `${modelName} Auto-Unload`,
+                                message: 'Model will be unloaded due to inactivity',
+                                type: 'warning',
+                                dismissible: false, // Cannot dismiss until unloaded
+                                remainingSeconds: s.remainingSeconds
                             });
                             notifiedModelsRef.current.add(s.id);
                         }
                         
-                        // Clear notification if model is used again
+                        // Clear notification if model is used again (timer reset)
                         if (s.remainingSeconds > 40 && notifiedModelsRef.current.has(s.id)) {
                             notifiedModelsRef.current.delete(s.id);
                             dismissNotification(`unload-${s.id}`);
                         }
                     });
                     setServerModelStates(newStates);
+                    
+                    // Remove notifications for models no longer in tracking (unloaded)
+                    setNotifications(prev => 
+                        prev.filter(notif => {
+                            if (!notif.id.startsWith('unload-')) return true;
+                            const modelId = notif.id.replace('unload-', '');
+                            return newStates.has(modelId);
+                        })
+                    );
                 }
             } catch (err) {
                 console.error('Failed to poll model status:', err);
@@ -232,7 +244,7 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
                 },
                 body: JSON.stringify({ modelId })
             });
-        } catch (err) {
+        } catch {
             // Ignore heartbeat errors
         }
     };
@@ -255,8 +267,11 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
 
     const addNotification = (notif: Notification) => {
         setNotifications(prev => {
-            // Prevent duplicate IDs
-            if (prev.find(n => n.id === notif.id)) return prev;
+            // Update existing notification or add new one
+            const existing = prev.find(n => n.id === notif.id);
+            if (existing) {
+                return prev.map(n => n.id === notif.id ? notif : n);
+            }
             return [...prev, notif];
         });
     };
