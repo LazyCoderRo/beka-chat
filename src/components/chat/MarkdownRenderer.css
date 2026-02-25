@@ -1,0 +1,168 @@
+.bk-code-block {
+    margin: var(--space-4) 0;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    border: 1px solid var(--border-default);
+    background: var(--bg-active);
+    position: relative;
+    box-shadow: var(--shadow-sm);
+}
+
+.bk-code-block__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-2) var(--space-4);
+    background: var(--bg-hover);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.bk-code-block__lang {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.bk-code-block__copy {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    transition: all var(--transition-fast);
+}
+
+.bk-code-block__copy:hover {
+    color: var(--text-primary);
+    background: var(--bg-overlay);
+}
+
+.bk-code-block__copy.copied {
+    color: var(--color-success);
+}
+
+/* Hide copy text by default to make it cleaner, show on hover of block */
+.bk-code-block__copy span {
+    display: none;
+}
+
+.bk-code-block:hover .bk-code-block__copy span {
+    display: inline;
+}
+
+/* Syntax highlighter overrides */
+.bk-code-block pre {
+    padding: var(--space-4) !important;
+    background: transparent !important;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* ── Code Tabs ──────────────────────────────────────────────────────────── */
+.bk-code-tabs {
+    margin: var(--space-4) 0;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-strong);
+    background: var(--bg-surface);
+    overflow: hidden;
+    box-shadow: var(--shadow-md);
+}
+
+.bk-code-tabs__header {
+    display: flex;
+    background: var(--bg-hover);
+    border-bottom: 1px solid var(--border-subtle);
+    padding-left: var(--space-1);
+}
+
+.bk-code-tabs__tab {
+    padding: var(--space-2) var(--space-5);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    position: relative;
+    text-transform: capitalize;
+}
+
+.bk-code-tabs__tab::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: var(--space-2);
+    right: var(--space-2);
+    height: 2px;
+    background: var(--accent-primary);
+    transform: scaleX(0);
+    transition: transform var(--transition-fast);
+}
+
+.bk-code-tabs__tab:hover {
+    color: var(--text-primary);
+}
+
+.bk-code-tabs__tab.active {
+    color: var(--accent-primary);
+}
+
+.bk-code-tabs__tab.active::after {
+    transform: scaleX(1);
+}
+
+/* Adjust nested code block inside tabs */
+.bk-code-tabs__content .bk-code-block {
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+}
+
+.bk-code-tabs__content .bk-code-block__header {
+    display: none;
+    /* In tabs, the tab name is the header */
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────────── */
+.bk-markdown table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: var(--space-4) 0;
+    font-size: var(--text-sm);
+    box-shadow: var(--shadow-sm);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.bk-markdown th,
+.bk-markdown td {
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--border-subtle);
+    text-align: left;
+}
+
+.bk-markdown th {
+    background: var(--bg-hover);
+    font-weight: var(--weight-semibold);
+    color: var(--text-primary);
+}
+
+.bk-markdown tr {
+    transition: background-color var(--transition-fast);
+}
+
+.bk-markdown tr:nth-child(even) {
+    background: var(--bg-surface);
+}
+
+.bk-markdown tr:hover {
+    background: var(--bg-hover);
+}

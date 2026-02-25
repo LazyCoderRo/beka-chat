@@ -1,0 +1,246 @@
+.bk-profile-page {
+    flex: 1;
+    padding: var(--space-8) var(--space-4);
+    background: var(--bg-base);
+    overflow-y: auto;
+}
+
+.bk-profile-container {
+    max-width: 900px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: var(--space-12);
+}
+
+/* ── Navigation ─────────────────────────────────────────────────────────── */
+.bk-profile-nav {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.bk-profile-nav__title {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-semi);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding-left: var(--space-3);
+}
+
+.bk-profile-nav__list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.bk-profile-nav__item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    transition: all var(--transition-fast);
+}
+
+.bk-profile-nav__item:hover {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+.bk-profile-nav__item.active {
+    background: var(--accent-subtle);
+    color: var(--text-accent);
+    font-weight: var(--weight-medium);
+}
+
+.bk-profile-nav__arrow {
+    margin-left: auto;
+    opacity: 0.5;
+}
+
+/* ── Content ────────────────────────────────────────────────────────────── */
+.bk-profile-content {
+    animation: fadeIn var(--transition-normal);
+}
+
+.bk-profile-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+}
+
+.bk-profile-section__title {
+    font-size: var(--text-xl);
+    font-weight: var(--weight-bold);
+    color: var(--text-primary);
+    margin-bottom: var(--space-2);
+}
+
+/* ── Profile tab ────────────────────────────────────────────────────────── */
+.bk-profile-avatar-edit {
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+    padding: var(--space-6);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+}
+
+.bk-profile-avatar-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.bk-profile-help {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+.bk-profile-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+    max-width: 480px;
+}
+
+.bk-profile-actions {
+    margin-top: var(--space-4);
+}
+
+/* ── Settings tab ───────────────────────────────────────────────────────── */
+.bk-settings-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.bk-settings-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-4);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+}
+
+.bk-settings-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.bk-settings-label {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-semi);
+    color: var(--text-primary);
+}
+
+.bk-settings-desc {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+/* Custom toggle switch */
+.bk-toggle {
+    appearance: none;
+    width: 36px;
+    height: 20px;
+    background: var(--bg-overlay);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-full);
+    position: relative;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.bk-toggle:checked {
+    background: var(--accent-primary);
+    border-color: transparent;
+}
+
+.bk-toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    background: white;
+    border-radius: var(--radius-full);
+    transition: transform var(--transition-fast);
+}
+
+.bk-toggle:checked::after {
+    transform: translateX(16px);
+}
+
+/* ── Billing tab ────────────────────────────────────────────────────────── */
+.bk-billing-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+}
+
+.bk-billing-header {
+    padding: var(--space-6);
+    background: var(--bg-elevated);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.bk-billing-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.bk-billing-plan {
+    font-size: var(--text-lg);
+    font-weight: var(--weight-bold);
+    color: var(--text-primary);
+}
+
+.bk-billing-price {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+}
+
+.bk-billing-features {
+    padding: var(--space-6);
+}
+
+.bk-billing-features ul {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.bk-billing-features li {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.bk-billing-features li::before {
+    content: '✓';
+    color: var(--color-success);
+    font-weight: var(--weight-bold);
+}

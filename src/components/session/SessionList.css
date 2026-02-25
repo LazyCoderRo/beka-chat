@@ -1,0 +1,29 @@
+.bk-session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-2) var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.bk-session-list--empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.bk-session-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.bk-session-group__label {
+    font-size: 10px;
+    font-weight: var(--weight-semi);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    padding: var(--space-2) var(--space-3) var(--space-1);
+}

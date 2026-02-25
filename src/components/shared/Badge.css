@@ -1,0 +1,59 @@
+.bk-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: var(--radius-full);
+    font-weight: var(--weight-medium);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.bk-badge--sm {
+    padding: 2px 8px;
+    font-size: var(--text-xs);
+}
+
+.bk-badge--md {
+    padding: 4px 10px;
+    font-size: var(--text-sm);
+}
+
+.bk-badge--default {
+    background: var(--bg-overlay);
+    color: var(--text-secondary);
+}
+
+.bk-badge--accent {
+    background: var(--accent-subtle);
+    color: var(--text-accent);
+}
+
+.bk-badge--success {
+    background: var(--color-success-bg);
+    color: var(--color-success);
+}
+
+.bk-badge--warning {
+    background: var(--color-warning-bg);
+    color: var(--color-warning);
+}
+
+.bk-badge--error {
+    background: var(--color-error-bg);
+    color: var(--color-error);
+}
+
+.bk-badge--vision {
+    background: var(--color-vision-bg);
+    color: var(--color-vision);
+}
+
+.bk-badge--web {
+    background: var(--color-web-bg);
+    color: var(--color-web-search);
+}
+
+.bk-badge--deep {
+    background: var(--color-deep-bg);
+    color: var(--color-deep-search);
+}

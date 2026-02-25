@@ -1,0 +1,164 @@
+.bk-task-drawer {
+    position: fixed;
+    top: calc(var(--header-height) + var(--space-4));
+    right: var(--space-4);
+    width: 280px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    z-index: 1000;
+    transform: translateX(calc(100% + var(--space-4)));
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.bk-task-drawer--visible {
+    transform: translateX(0);
+}
+
+.bk-task-drawer__header {
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.bk-task-drawer__title {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-bold);
+    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.bk-task-drawer__count {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--text-on-accent);
+    background: var(--accent-primary);
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+}
+
+.bk-task-drawer__list {
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.bk-task-drawer__item {
+    padding: var(--space-3);
+    background: var(--bg-base);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    position: relative;
+    overflow: hidden;
+}
+
+.bk-task-drawer__item--running {
+    border-color: var(--accent-primary);
+    background: var(--accent-subtle);
+}
+
+.bk-task-drawer__item--done {
+    border-color: var(--color-success);
+}
+
+.bk-task-drawer__item--error {
+    border-color: var(--color-error);
+}
+
+.bk-task-drawer__item-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.bk-task-drawer__item--running .bk-task-drawer__item-icon {
+    color: var(--accent-primary);
+}
+
+.bk-task-drawer__item--done .bk-task-drawer__item-icon {
+    color: var(--color-success);
+}
+
+.bk-task-drawer__item--error .bk-task-drawer__item-icon {
+    color: var(--color-error);
+}
+
+.bk-task-drawer__item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.bk-task-drawer__item-label {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--text-primary);
+}
+
+.bk-task-drawer__item-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.bk-task-drawer__item-meta svg {
+    margin-top: 1px;
+}
+
+.bk-task-drawer__progress-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.bk-task-drawer__progress-fill {
+    height: 100%;
+    background: var(--accent-primary);
+    width: 30%;
+    animation: taskProgress 2s linear infinite;
+}
+
+@keyframes taskProgress {
+    0% {
+        transform: translateX(-100%);
+    }
+
+    100% {
+        transform: translateX(333%);
+    }
+}
+
+.bk-task-drawer__empty {
+    padding: var(--space-6);
+    text-align: center;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.animate-spin {
+    animation: spin 1s linear infinite;
+}

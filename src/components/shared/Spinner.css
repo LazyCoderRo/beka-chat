@@ -1,0 +1,47 @@
+.bk-spinner {
+    display: inline-block;
+    border-radius: var(--radius-full);
+    border: 2px solid var(--border-strong);
+    border-top-color: var(--accent-primary);
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+}
+
+.bk-spinner--sm {
+    width: 16px;
+    height: 16px;
+}
+
+.bk-spinner--md {
+    width: 24px;
+    height: 24px;
+}
+
+.bk-spinner--lg {
+    width: 36px;
+    height: 36px;
+    border-width: 3px;
+}
+
+/* ── Animated dots ─────────────────────────────────────────────────────── */
+.bk-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.bk-dots__dot {
+    width: 6px;
+    height: 6px;
+    background: var(--text-muted);
+    border-radius: var(--radius-full);
+    animation: pulse 1.2s ease infinite;
+}
+
+.bk-dots__dot:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.bk-dots__dot:nth-child(3) {
+    animation-delay: 0.4s;
+}

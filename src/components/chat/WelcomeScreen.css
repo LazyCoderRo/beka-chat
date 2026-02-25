@@ -1,0 +1,156 @@
+.bk-welcome {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-8);
+    padding: var(--space-12) var(--space-6);
+    flex: 1;
+    animation: fadeIn var(--transition-slow);
+}
+
+.bk-welcome__hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-4);
+    text-align: center;
+}
+
+.bk-welcome__logo {
+    width: 64px;
+    height: 64px;
+    border-radius: var(--radius-xl);
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    box-shadow: var(--shadow-accent);
+}
+
+.bk-welcome__title {
+    font-size: var(--text-2xl);
+    font-weight: var(--weight-bold);
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+    line-height: var(--leading-tight);
+}
+
+.bk-welcome__sub {
+    font-size: var(--text-base);
+    color: var(--text-secondary);
+    max-width: 460px;
+    line-height: var(--leading-relaxed);
+}
+
+/* ── Suggestions ────────────────────────────────────────────────────────── */
+.bk-welcome__suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    justify-content: center;
+    max-width: 620px;
+}
+
+.bk-welcome__chip {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-default);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    font-family: var(--font-sans);
+    transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
+}
+
+.bk-welcome__chip:hover {
+    transform: translateY(-2px);
+    color: var(--text-primary);
+}
+
+.bk-welcome__chip--accent {
+    border-color: var(--border-accent);
+}
+
+.bk-welcome__chip--accent:hover {
+    background: var(--accent-subtle);
+}
+
+.bk-welcome__chip--web:hover {
+    background: var(--color-web-bg);
+    color: var(--color-web-search);
+    border-color: rgba(56, 189, 248, 0.3);
+}
+
+.bk-welcome__chip--deep:hover {
+    background: var(--color-deep-bg);
+    color: var(--color-deep-search);
+    border-color: rgba(251, 146, 60, 0.3);
+}
+
+.bk-welcome__chip--vision:hover {
+    background: var(--color-vision-bg);
+    color: var(--color-vision);
+    border-color: rgba(167, 139, 250, 0.3);
+}
+
+.bk-welcome__chip-icon {
+    display: flex;
+    align-items: center;
+}
+
+/* ── Capabilities ───────────────────────────────────────────────────────── */
+.bk-welcome__capabilities {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-4) var(--space-6);
+    justify-content: center;
+    padding: var(--space-4) var(--space-6);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    max-width: 560px;
+    width: 100%;
+}
+
+.bk-welcome__cap {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+.bk-welcome__cap-icon {
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.bk-welcome__cap-icon--web {
+    color: var(--color-web-search);
+}
+
+.bk-welcome__cap-icon--deep {
+    color: var(--color-deep-search);
+}
+
+.bk-welcome__cap-icon--vision {
+    color: var(--color-vision);
+}
+
+.bk-welcome__cap-badge {
+    font-size: 10px;
+    font-weight: var(--weight-semi);
+    background: var(--color-web-bg);
+    color: var(--color-web-search);
+    padding: 1px 6px;
+    border-radius: var(--radius-full);
+    margin-left: 4px;
+    letter-spacing: 0.03em;
+}

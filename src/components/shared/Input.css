@@ -1,0 +1,103 @@
+.bk-input-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.bk-input-label {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--text-secondary);
+}
+
+.bk-input-field {
+    position: relative;
+    display: flex;
+    align-items: center;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius-md);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.bk-input-field:focus-within {
+    border-color: var(--input-focus-border);
+    box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+.bk-input-field--error {
+    border-color: var(--color-error) !important;
+}
+
+.bk-input-field--error:focus-within {
+    box-shadow: 0 0 0 3px var(--color-error-bg);
+}
+
+.bk-input {
+    flex: 1;
+    height: 42px;
+    padding: 0 var(--space-4);
+    color: var(--text-primary);
+    font-size: var(--text-base);
+    background: transparent;
+    border: none;
+    outline: none;
+    /* Remove individual radius to avoid weird gaps with background-colors like autofill */
+    border-radius: 0;
+}
+
+.bk-input--has-left {
+    padding-left: var(--space-2);
+}
+
+.bk-input--has-right {
+    padding-right: var(--space-2);
+}
+
+/* Fix browser autofill styling */
+.bk-input:-webkit-autofill,
+.bk-input:-webkit-autofill:hover,
+.bk-input:-webkit-autofill:focus,
+.bk-input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 30px var(--input-bg) inset !important;
+    -webkit-text-fill-color: var(--text-primary) !important;
+    transition: background-color 5000s ease-in-out 0s;
+}
+
+.bk-input::placeholder {
+    color: var(--text-muted);
+}
+
+.bk-input-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--text-muted);
+    height: 42px;
+}
+
+.bk-input-icon svg {
+    width: 16px;
+    height: 16px;
+}
+
+.bk-input-icon--left {
+    padding-left: var(--space-3);
+}
+
+.bk-input-icon--right {
+    padding-right: var(--space-3);
+}
+
+.bk-input-error {
+    font-size: var(--text-xs);
+    color: var(--color-error);
+    margin-top: var(--space-1);
+}
+
+.bk-input-hint {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    margin-top: var(--space-1);
+}

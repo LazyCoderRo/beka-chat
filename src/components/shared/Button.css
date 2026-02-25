@@ -1,0 +1,144 @@
+.bk-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    border-radius: var(--radius-md);
+    font-weight: var(--weight-medium);
+    letter-spacing: 0.01em;
+    transition:
+        background-color var(--transition-fast),
+        color var(--transition-fast),
+        border-color var(--transition-fast),
+        box-shadow var(--transition-fast),
+        transform var(--transition-fast),
+        opacity var(--transition-fast);
+    white-space: nowrap;
+    position: relative;
+    overflow: hidden;
+}
+
+.bk-btn:active:not(.bk-btn--disabled) {
+    transform: scale(0.97);
+}
+
+/* Sizes */
+.bk-btn--sm {
+    height: 32px;
+    padding: 0 var(--space-3);
+    font-size: var(--text-sm);
+}
+
+.bk-btn--md {
+    height: 38px;
+    padding: 0 var(--space-5);
+    font-size: var(--text-base);
+}
+
+.bk-btn--lg {
+    height: 46px;
+    padding: 0 var(--space-6);
+    font-size: var(--text-md);
+}
+
+.bk-btn--icon {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: var(--radius-md);
+}
+
+/* Full width */
+.bk-btn--full {
+    width: 100%;
+}
+
+/* Disabled */
+.bk-btn--disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ── Primary ─────────────────────────────────────────────────────────────── */
+.bk-btn--primary {
+    background: var(--accent-primary);
+    color: var(--text-on-accent);
+    box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+.bk-btn--primary:hover:not(.bk-btn--disabled) {
+    background: var(--accent-secondary);
+    box-shadow: 0 4px 16px var(--accent-glow);
+}
+
+/* ── Secondary ───────────────────────────────────────────────────────────── */
+.bk-btn--secondary {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+}
+
+.bk-btn--secondary:hover:not(.bk-btn--disabled) {
+    background: var(--bg-overlay);
+    border-color: var(--border-strong);
+}
+
+/* ── Ghost ───────────────────────────────────────────────────────────────── */
+.bk-btn--ghost {
+    background: transparent;
+    color: var(--text-secondary);
+}
+
+.bk-btn--ghost:hover:not(.bk-btn--disabled) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+/* ── Accent outline ──────────────────────────────────────────────────────── */
+.bk-btn--accent-outline {
+    background: var(--accent-subtle);
+    color: var(--text-accent);
+    border: 1px solid var(--border-accent);
+}
+
+.bk-btn--accent-outline:hover:not(.bk-btn--disabled) {
+    background: var(--accent-glow);
+}
+
+/* ── Danger ──────────────────────────────────────────────────────────────── */
+.bk-btn--danger {
+    background: var(--color-error-bg);
+    color: var(--color-error);
+    border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+.bk-btn--danger:hover:not(.bk-btn--disabled) {
+    background: rgba(248, 113, 113, 0.2);
+}
+
+/* ── Spinner ─────────────────────────────────────────────────────────────── */
+.bk-btn__spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: var(--radius-full);
+    animation: spin 0.7s linear infinite;
+    opacity: 0.7;
+}
+
+.bk-btn__icon {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.bk-btn__icon svg {
+    width: 16px;
+    height: 16px;
+}
+
+.bk-btn--lg .bk-btn__icon svg {
+    width: 18px;
+    height: 18px;
+}

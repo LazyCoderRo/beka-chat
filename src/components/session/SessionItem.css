@@ -1,0 +1,164 @@
+.bk-session-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-3);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    position: relative;
+    animation: fadeIn var(--transition-fast);
+}
+
+.bk-session-item:hover {
+    background: var(--bg-hover);
+}
+
+.bk-session-item--active {
+    background: var(--bg-active);
+}
+
+.bk-session-item--active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 20%;
+    height: 60%;
+    width: 3px;
+    background: var(--accent-primary);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.bk-session-item__body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.bk-session-item__top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+.bk-session-item__title {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+}
+
+.bk-session-item__meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex-shrink: 0;
+}
+
+.bk-session-item__date {
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.bk-session-item__pin {
+    color: var(--accent-primary);
+}
+
+.bk-session-item__bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+.bk-session-item__preview {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+}
+
+.bk-session-item__badges {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+}
+
+.bk-session-item__badge {
+    color: var(--text-muted);
+}
+
+.bk-session-item__badge {
+    color: var(--text-muted);
+}
+
+.bk-session-item__tag {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: var(--weight-medium);
+}
+
+.bk-session-item__tag span {
+    text-transform: capitalize;
+}
+
+.bk-session-item__tag--web {
+    background: var(--color-web-bg);
+    color: var(--color-web-search);
+}
+
+.bk-session-item__tag--deep {
+    background: var(--color-deep-bg);
+    color: var(--color-deep-search);
+}
+
+/* ── Hover actions ──────────────────────────────────────────────────────── */
+.bk-session-item__actions {
+    display: none;
+    flex-shrink: 0;
+    gap: 2px;
+}
+
+.bk-session-item:hover .bk-session-item__actions {
+    display: flex;
+}
+
+.bk-session-item__action {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.bk-session-item__action:hover {
+    background: var(--bg-overlay);
+    color: var(--text-primary);
+}
+
+.bk-session-item__action--danger:hover {
+    background: var(--color-error-bg);
+    color: var(--color-error);
+}

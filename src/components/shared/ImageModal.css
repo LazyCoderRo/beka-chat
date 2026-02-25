@@ -1,0 +1,81 @@
+.bk-img-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(8px);
+    animation: fadeIn 0.2s ease;
+}
+
+.bk-img-modal__overlay {
+    position: absolute;
+    inset: 0;
+}
+
+.bk-img-modal__toolbar {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    left: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 10;
+    pointer-events: none;
+}
+
+.bk-img-modal__tools,
+.bk-img-modal__close {
+    pointer-events: auto;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-2);
+    display: flex;
+    gap: var(--space-2);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-lg);
+}
+
+.bk-img-modal__tools button,
+.bk-img-modal__btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-1);
+    border-radius: var(--radius-sm);
+    transition: background 0.2s;
+}
+
+.bk-img-modal__tools button:hover,
+.bk-img-modal__btn:hover {
+    background: var(--bg-hover);
+}
+
+.bk-img-modal__content {
+    width: 90%;
+    height: 90%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+    position: relative;
+    cursor: grab;
+}
+
+.bk-img-modal__content:active {
+    cursor: grabbing;
+}
+
+.bk-img-modal__image {
+    max-width: 95%;
+    max-height: 95%;
+    object-fit: contain;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+    border-radius: var(--radius-sm);
+}
