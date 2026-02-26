@@ -4,17 +4,15 @@ import { useAIConfig } from '../context/AIConfigContext';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/shared/Button';
 import { LoadModelModal } from '../components/shared/LoadModelModal';
-import { Server, Cpu, Image, Database, Save, RefreshCw, CheckCircle2, Zap, Layers, Eye, Globe, Download, Trash2, Clock, Sparkles, Settings, AlertCircle } from 'lucide-react';
+import { Cpu, Image, Database, Save, CheckCircle2, Zap, Layers, Eye, Download, Trash2, Clock, Sparkles, Settings, AlertCircle } from 'lucide-react';
 import { CustomDropdown } from '../components/shared/CustomDropdown';
 import type { AIModel } from '../types';
 
-type AdminSection = 'endpoints' | 'models' | 'defaults' | 'general';
+type AdminSection = 'models' | 'defaults' | 'general';
 
 export function AdminPage() {
-    const { config, updateConfig, availableModels, fetchModels, isLoadingModels, loadModel, unloadModel } = useAIConfig();
+    const { config, updateConfig, availableModels, fetchModels, loadModel, unloadModel } = useAIConfig();
     const { user } = useAuth();
-    const [endpoint, setEndpoint] = useState(config.lmStudioEndpoint);
-    const [perplexicaEndpoint, setPerplexicaEndpoint] = useState(config.perplexicaEndpoint);
     const [visionModel, setVisionModel] = useState(config.defaultVisionModelId);
     const [chatModel, setChatModel] = useState(config.defaultChatModelId);
     const [embeddingModel, setEmbeddingModel] = useState(config.defaultEmbeddingModelId);
@@ -25,7 +23,7 @@ export function AdminPage() {
     const [loadModelModalOpen, setLoadModelModalOpen] = useState(false);
     const [selectedModelToLoad, setSelectedModelToLoad] = useState<AIModel | null>(null);
     const [isLoadingAModel, setIsLoadingAModel] = useState(false);
-    const [activeSection, setActiveSection] = useState<AdminSection>('endpoints');
+    const [activeSection, setActiveSection] = useState<AdminSection>('models');
 
     // Auto-refresh models when admin modal opens
     useEffect(() => {
@@ -45,8 +43,6 @@ export function AdminPage() {
 
     const handleSave = () => {
         updateConfig({
-            lmStudioEndpoint: endpoint,
-            perplexicaEndpoint,
             defaultVisionModelId: visionModel,
             defaultChatModelId: chatModel,
             defaultEmbeddingModelId: embeddingModel,
@@ -108,13 +104,6 @@ export function AdminPage() {
             {/* Navigation Tabs */}
             <div className="bk-admin-nav">
                 <button
-                    className={`bk-admin-nav-item ${activeSection === 'endpoints' ? 'active' : ''}`}
-                    onClick={() => setActiveSection('endpoints')}
-                >
-                    <Server size={16} />
-                    Endpoints
-                </button>
-                <button
                     className={`bk-admin-nav-item ${activeSection === 'models' ? 'active' : ''}`}
                     onClick={() => setActiveSection('models')}
                 >
@@ -139,54 +128,6 @@ export function AdminPage() {
 
             {/* Content */}
             <div className="bk-admin-content">
-                    {/* ENDPOINTS SECTION */}
-                {activeSection === 'endpoints' && (
-                    <>
-                        {/* API Endpoint */}
-                        <section className="bk-admin-section">
-                            <label className="bk-admin-label">
-                                <Server size={16} />
-                                LM Studio API Endpoint
-                            </label>
-                            <div className="bk-admin-input-group">
-                                <input
-                                    type="text"
-                                    value={endpoint}
-                                    onChange={(e) => setEndpoint(e.target.value)}
-                                    className="bk-input"
-                                    placeholder="http://192.168.1.134:1234/api/v1"
-                                    style={{ flex: 1 }}
-                                />
-                                <Button
-                                    variant="secondary"
-                                    onClick={() => fetchModels()}
-                                    disabled={isLoadingModels}
-                                    title="Refresh model list"
-                                >
-                                    <RefreshCw size={16} className={isLoadingModels ? 'animate-spin' : ''} />
-                                </Button>
-                            </div>
-                        </section>
-
-                        <section className="bk-admin-section">
-                            <label className="bk-admin-label">
-                                <Globe size={16} />
-                                Beka Search Engine Endpoint
-                            </label>
-                            <div className="bk-admin-input-group">
-                                <input
-                                    type="text"
-                                    value={perplexicaEndpoint}
-                                    onChange={(e) => setPerplexicaEndpoint(e.target.value)}
-                                    className="bk-input"
-                                    placeholder="/beka-search (dev proxy) or http://localhost:3000"
-                                    style={{ flex: 1 }}
-                                />
-                            </div>
-                        </section>
-                    </>
-                )}
-
                 {/* MODEL MANAGEMENT SECTION */}
                 {activeSection === 'models' && (
                     <section className="bk-admin-section" style={{ gridColumn: '1 / -1' }}>

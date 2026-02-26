@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import { Bot, Sparkles, Globe, Zap, Paperclip } from 'lucide-react';
 import { DeepResearchModal } from './DeepResearchModal';
 import { parseDocument } from '../../utils/documentParser';
+import { useAuth } from '../../context/AuthContext';
 import type { FileAttachment, SearchMode } from '../../types';
 
 const SUGGESTIONS = [
@@ -62,9 +63,11 @@ interface WelcomeScreenProps {
 }
 
 export function WelcomeScreen({ onSend }: WelcomeScreenProps) {
+    const { user } = useAuth();
     const documentInputRef = useRef<HTMLInputElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const [isDeepResearchModalOpen, setIsDeepResearchModalOpen] = useState(false);
+    const firstName = user?.name?.trim().split(/\s+/)[0] || 'friend';
 
     const handleSuggestionClick = async (suggestion: typeof SUGGESTIONS[number]) => {
         if (suggestion.isModal) {
@@ -102,10 +105,10 @@ export function WelcomeScreen({ onSend }: WelcomeScreenProps) {
                     <Bot size={32} />
                 </div>
                 <h1 className="bk-welcome__title">
-                    How can I help you today?
+                    What are we building today, <span className="bk-welcome__title-accent">{firstName}</span>?
                 </h1>
                 <p className="bk-welcome__sub">
-                    Ask questions, analyze files, search the web, or start a deep research session.
+                    I am Beka: named after a cute little girl, but fully employed as your AI sidekick for questions, files, web hunts, and deep research.
                 </p>
             </div>
 

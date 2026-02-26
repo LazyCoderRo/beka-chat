@@ -5,8 +5,7 @@ import dotenv from 'dotenv';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
+import { Readable } from 'stream';
 
 dotenv.config();
 
@@ -23,6 +22,20 @@ const pool = new Pool({
 });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
+const DEFAULT_LM_STUDIO_ENDPOINT = 'http://192.168.1.134:1234/api/v1';
+const AVATAR_OPTIONS = Array.from({ length: 12 }, (_, i) => `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${i + 1}`);
+
+function pickRandomAvatarUrl(): string {
+    return AVATAR_OPTIONS[Math.floor(Math.random() * AVATAR_OPTIONS.length)];
+}
+
+async function ensureUserHasAvatar(userId: number): Promise<void> {
+    const { rows } = await pool.query('SELECT avatarurl FROM users WHERE id = $1', [userId]);
+    const currentAvatar = rows[0]?.avatarurl;
+    if (currentAvatar) return;
+
+    await pool.query('UPDATE users SET avatarurl = $1 WHERE id = $2', [pickRandomAvatarUrl(), userId]);
+}
 
 // ─── Model Management ───────────────────────────────────────────────────────
 interface ModelState {
@@ -44,7 +57,7 @@ async function getSetting(key: string, defaultValue: any) {
 }
 
 async function unloadModelOnLMStudio(modelId: string) {
-    const endpoint = await getSetting('lmStudioEndpoint', 'http://192.168.1.134:1234/api/v1');
+    const endpoint = DEFAULT_LM_STUDIO_ENDPOINT;
     try {
         console.log(`[IDLE] Auto-unloading idle model: ${modelId}`);
         const response = await fetch(`${endpoint}/models/unload`, {
@@ -84,7 +97,7 @@ setInterval(async () => {
 
 // Sync with LM Studio to track any "orphan" loaded models
 async function syncLoadedModels() {
-    const endpoint = await getSetting('lmStudioEndpoint', 'http://192.168.1.134:1234/api/v1');
+    const endpoint = DEFAULT_LM_STUDIO_ENDPOINT;
     const defaultIdle = await getSetting('defaultIdleTimeMinutes', 60);
     
     try {
@@ -175,9 +188,10 @@ app.post('/api/auth/register', async (req, res) => {
     try {
         const { name, email, password } = req.body;
         const hash = await bcrypt.hash(password, 10);
+        const avatarUrl = pickRandomAvatarUrl();
         const result = await pool.query(
-            'INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id, name, email, role, avatarurl as "avatarUrl", createdat as "createdAt"',
-            [name, email, hash]
+            'INSERT INTO users (name, email, password, avatarurl) VALUES ($1, $2, $3, $4) RETURNING id, name, email, role, avatarurl as "avatarUrl", createdat as "createdAt"',
+            [name, email, hash, avatarUrl]
         );
         const user = result.rows[0];
         const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
@@ -203,9 +217,13 @@ app.post('/api/auth/login', async (req, res) => {
         const valid = await bcrypt.compare(password, user.password);
         if (!valid) return res.status(400).json({ error: 'Invalid password' });
 
+        await ensureUserHasAvatar(user.id);
+        const sanitized = await pool.query(
+            'SELECT id, name, email, role, avatarurl as "avatarUrl", createdat as "createdAt" FROM users WHERE id = $1',
+            [user.id]
+        );
         const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-        delete user.password;
-        res.json({ user, token });
+        res.json({ user: sanitized.rows[0], token });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }
@@ -213,6 +231,7 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/auth/me', authenticateToken, async (req: any, res) => {
     try {
+        await ensureUserHasAvatar(req.user.id);
         const result = await pool.query('SELECT id, name, email, role, avatarurl as "avatarUrl", createdat as "createdAt" FROM users WHERE id = $1', [req.user.id]);
         res.json({ user: result.rows[0] });
     } catch (err: any) {
@@ -265,6 +284,8 @@ app.get('/api/admin/settings', async (req, res) => {
     try {
         const result = await pool.query("SELECT key, value FROM app_settings");
         const settings = result.rows.reduce((acc, row) => ({ ...acc, [row.key]: JSON.parse(row.value) }), {});
+        delete (settings as Record<string, unknown>).lmStudioEndpoint;
+        delete (settings as Record<string, unknown>).perplexicaEndpoint;
         res.json(settings);
     } catch (err: any) {
         res.status(500).json({ error: err.message });
@@ -275,7 +296,10 @@ app.post('/api/admin/settings', authenticateToken, async (req: any, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access Denied' });
 
     try {
-        const settings = req.body;
+        const settings = req.body || {};
+        delete settings.lmStudioEndpoint;
+        delete settings.perplexicaEndpoint;
+
         for (const [key, value] of Object.entries(settings)) {
             await pool.query(
                 'INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
@@ -285,6 +309,60 @@ app.post('/api/admin/settings', authenticateToken, async (req: any, res) => {
         res.json({ success: true });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// ─── LM Studio Proxy Endpoints ──────────────────────────────────────────────
+app.get('/api/lmstudio/models', async (req, res) => {
+    try {
+        const endpoint = DEFAULT_LM_STUDIO_ENDPOINT;
+        const upstream = await fetch(`${endpoint}/models`);
+        const contentType = upstream.headers.get('content-type') || 'application/json';
+        const text = await upstream.text();
+        res.status(upstream.status).type(contentType).send(text);
+    } catch (err: any) {
+        res.status(500).json({ error: err?.message || 'Failed to fetch models from LM Studio' });
+    }
+});
+
+app.post('/api/lmstudio/models/load', async (req, res) => {
+    try {
+        const endpoint = DEFAULT_LM_STUDIO_ENDPOINT;
+        const upstream = await fetch(`${endpoint}/models/load`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(req.body || {})
+        });
+        const contentType = upstream.headers.get('content-type') || 'application/json';
+        const text = await upstream.text();
+        res.status(upstream.status).type(contentType).send(text);
+    } catch (err: any) {
+        res.status(500).json({ error: err?.message || 'Failed to load model on LM Studio' });
+    }
+});
+
+app.post('/api/lmstudio/chat', async (req, res) => {
+    try {
+        const endpoint = DEFAULT_LM_STUDIO_ENDPOINT;
+        const upstream = await fetch(`${endpoint}/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(req.body || {})
+        });
+
+        const contentType = upstream.headers.get('content-type') || 'application/json';
+        res.status(upstream.status);
+        res.setHeader('Content-Type', contentType);
+
+        if (!upstream.body) {
+            const text = await upstream.text();
+            res.send(text);
+            return;
+        }
+
+        Readable.fromWeb(upstream.body as any).pipe(res);
+    } catch (err: any) {
+        res.status(500).json({ error: err?.message || 'Failed to proxy chat request to LM Studio' });
     }
 });
 

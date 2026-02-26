@@ -10,7 +10,7 @@ import { ImageModal } from '../components/shared/ImageModal';
 import { Spinner } from '../components/shared/Spinner';
 import { archiveMessagesWithSummary, calculateContextTokens, getContextMessagesForAPI } from '../utils/contextManager';
 import { getSmartRecommendations, recommendationsToActionSuggestions, generateNextPromptSuggestionsWithModel } from '../utils/smartRecommendations';
-import type { FileAttachment, SearchMode, ChatSession, Message, ToolCall, WebSearchSource, MessageActionSuggestion } from '../types';
+import type { AIModel, FileAttachment, SearchMode, ChatSession, Message, ToolCall, WebSearchSource, MessageActionSuggestion } from '../types';
 
 interface PerplexicaModel {
     key: string;
@@ -56,6 +56,34 @@ const URL_REGEX = /\b((?:https?:\/\/|www\.)[^\s/$.?#].[^\s]*)/gi;
 
 function trimTrailingSlash(value: string): string {
     return value.replace(/\/+$/, '');
+}
+
+const LM_STUDIO_PROXY_BASE = '/api/lmstudio';
+
+function resolveModel(
+    models: AIModel[],
+    preferredId: string | undefined,
+    capability?: 'text' | 'vision' | 'embedding' | 'search'
+): AIModel | undefined {
+    const pool = capability ? models.filter(m => m.capabilities.includes(capability)) : models;
+    if (pool.length === 0) return undefined;
+
+    if (preferredId) {
+        const preferred = preferredId.trim().toLowerCase();
+        const exact = pool.find(m => m.id.toLowerCase() === preferred);
+        if (exact) return exact;
+
+        const suffix = pool.find(m => {
+            const id = m.id.toLowerCase();
+            return id.endsWith(`/${preferred}`) || preferred.endsWith(`/${id}`);
+        });
+        if (suffix) return suffix;
+
+        const partial = pool.find(m => m.id.toLowerCase().includes(preferred));
+        if (partial) return partial;
+    }
+
+    return pool.find(m => m.isLoaded) || pool[0];
 }
 
 function resolvePerplexicaBase(endpoint: string): string {
@@ -325,7 +353,8 @@ export function ChatPage() {
     const triggerContextSummarization = async (
         messages: Message[],
         sessionId: string,
-        selectedModel: { maxContextLength?: number } | undefined
+        selectedModel: { maxContextLength?: number } | undefined,
+        chatModelId: string
     ) => {
         const maxContext = selectedModel?.maxContextLength || 8192;
         const { percentage } = calculateContextTokens(messages, maxContext);
@@ -384,13 +413,11 @@ export function ChatPage() {
             }
 
             const summaryPrompt = `Summarize this conversation in 2-3 sentences:\n\n${conversationText}`;
-            const baseUrl = config.lmStudioEndpoint;
-
-            const response = await fetch(`${baseUrl}/chat`, {
+            const response = await fetch(`${LM_STUDIO_PROXY_BASE}/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    model: config.defaultChatModelId,
+                    model: chatModelId,
                     input: summaryPrompt,
                     stream: false
                 })
@@ -449,9 +476,10 @@ export function ChatPage() {
     const handleContextSummarization = (
         messages: Message[],
         sessionId: string,
-        selectedModel: { maxContextLength?: number } | undefined
+        selectedModel: { maxContextLength?: number } | undefined,
+        chatModelId: string
     ) => {
-        void triggerContextSummarization(messages, sessionId, selectedModel);
+        void triggerContextSummarization(messages, sessionId, selectedModel, chatModelId);
     };
 
     const handleSend = async (
@@ -470,14 +498,24 @@ export function ChatPage() {
         setPromptSuggestions([]);
 
         // Auto-load models if none are loaded
+        const resolvedChatModel = resolveModel(availableModels, config.defaultChatModelId, 'text');
+        const resolvedVisionModel = resolveModel(availableModels, config.defaultVisionModelId, 'vision');
+        const resolvedToolModel = resolveModel(availableModels, config.defaultToolCallingModelId, 'text');
+        const resolvedEmbeddingModel = resolveModel(availableModels, config.defaultEmbeddingModelId, 'embedding');
+
+        const resolvedChatModelId = resolvedChatModel?.id || config.defaultChatModelId;
+        const resolvedVisionModelId = resolvedVisionModel?.id || config.defaultVisionModelId;
+        const resolvedToolModelId = resolvedToolModel?.id || config.defaultToolCallingModelId;
+        const resolvedEmbeddingModelId = resolvedEmbeddingModel?.id || config.defaultEmbeddingModelId;
+
         const loadedModels = availableModels.filter(m => m.isLoaded);
         if (loadedModels.length === 0) {
             setIsAutoLoading(true);
             try {
                 // Check which models need to be loaded
-                const defaultChat = availableModels.find(m => m.id === config.defaultChatModelId && !m.isLoaded);
-                const defaultVision = availableModels.find(m => m.id === config.defaultVisionModelId && !m.isLoaded);
-                const defaultToolCall = availableModels.find(m => m.id === config.defaultToolCallingModelId && !m.isLoaded);
+                const defaultChat = availableModels.find(m => m.id === resolvedChatModelId && !m.isLoaded);
+                const defaultVision = availableModels.find(m => m.id === resolvedVisionModelId && !m.isLoaded);
+                const defaultToolCall = availableModels.find(m => m.id === resolvedToolModelId && !m.isLoaded);
 
                 // Load them in parallel with skip refresh, then refresh once at the end
                 const idleMinutes = config.defaultIdleTimeMinutes || 60;
@@ -485,7 +523,7 @@ export function ChatPage() {
                 if (defaultChat) {
                     modelsToLoad.push(
                         loadModel(defaultChat.id, {
-                            contextWindow: 64000,
+                            contextWindow: 128000,
                             idleTimeMinutes: idleMinutes,
                             skipRefresh: true
                         })
@@ -494,7 +532,7 @@ export function ChatPage() {
                 if (defaultVision) {
                     modelsToLoad.push(
                         loadModel(defaultVision.id, {
-                            contextWindow: 8000,
+                            contextWindow: 16000,
                             idleTimeMinutes: idleMinutes,
                             skipRefresh: true
                         })
@@ -503,7 +541,7 @@ export function ChatPage() {
                 if (defaultToolCall) {
                     modelsToLoad.push(
                         loadModel(defaultToolCall.id, {
-                            contextWindow: 3000,
+                            contextWindow: 8000,
                             idleTimeMinutes: idleMinutes,
                             skipRefresh: true
                         })
@@ -551,8 +589,8 @@ export function ChatPage() {
         const futureMessages = includeUserMessage ? [...previousMessages, userMsg] : previousMessages;
 
         // Check and handle context summarization BEFORE adding AI response
-        const selectedModel = availableModels.find(m => m.id === config.defaultChatModelId);
-        handleContextSummarization(futureMessages, targetSid, selectedModel);
+        const selectedModel = availableModels.find(m => m.id === resolvedChatModelId);
+        handleContextSummarization(futureMessages, targetSid, selectedModel, resolvedChatModelId || 'default');
 
         const startTime = Date.now();
 
@@ -571,20 +609,38 @@ export function ChatPage() {
                 createdAt: new Date().toISOString(),
             };
 
-            setSessions((prev: ChatSession[]) => prev.map(s => {
-                if (s.id !== targetSid) return s;
-                const baseMessages = forcedBaseMessages ?? s.messages;
+            setSessions((prev: ChatSession[]) => {
+                const existing = prev.find(s => s.id === targetSid);
+                const fallbackBaseMessages = forcedBaseMessages ?? [];
+                const baseSession: ChatSession = existing ?? {
+                    id: targetSid,
+                    title: 'New Chat',
+                    preview: '',
+                    messages: fallbackBaseMessages,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                    hasAttachments: false,
+                    searchMode: 'none',
+                    usedSearchModes: [],
+                };
+
+                const baseMessages = forcedBaseMessages ?? baseSession.messages;
                 const messages = [...baseMessages, userMsg, recommendationMsg];
                 const last = messages[messages.length - 1];
-                return {
-                    ...s,
+                const nextSession: ChatSession = {
+                    ...baseSession,
                     messages,
                     hasAttachments: messages.some(m => (m.attachments?.length || 0) > 0),
                     updatedAt: new Date().toISOString(),
                     preview: last?.content?.slice(0, 60) || '',
-                    title: baseMessages.length === 0 ? content.slice(0, 30) + (content.length > 30 ? '...' : '') : s.title
+                    title: baseMessages.length === 0 ? content.slice(0, 30) + (content.length > 30 ? '...' : '') : baseSession.title
                 };
-            }));
+
+                if (existing) {
+                    return prev.map(s => s.id === targetSid ? nextSession : s);
+                }
+                return [nextSession, ...prev];
+            });
             return;
         }
 
@@ -605,31 +661,46 @@ export function ChatPage() {
         };
         activeGenerationRef.current = generation;
 
-        setSessions((prev: ChatSession[]) => prev.map(s => {
-            if (s.id === targetSid) {
-                const baseMessages = forcedBaseMessages ?? s.messages;
-                const usedSearchModes = s.usedSearchModes ? [...s.usedSearchModes] : [];
-                if (finalSearchMode !== 'none' && !usedSearchModes.includes(finalSearchMode)) {
-                    usedSearchModes.push(finalSearchMode);
-                }
-                const appended = includeUserMessage ? [userMsg, aiMsg] : [aiMsg];
-                const messages = [...baseMessages, ...appended];
-                return {
-                    ...s,
-                    messages,
-                    searchMode: finalSearchMode !== 'none' ? finalSearchMode : s.searchMode,
-                    usedSearchModes,
-                    hasAttachments: messages.some(m => (m.attachments?.length || 0) > 0),
-                    updatedAt: new Date().toISOString(),
-                    preview: content.slice(0, 60) || (attachments.length > 0 ? 'Image uploaded' : ''),
-                    title: baseMessages.length === 0 ? content.slice(0, 30) + (content.length > 30 ? '...' : '') : s.title
-                };
-            }
-            return s;
-        }));
+        setSessions((prev: ChatSession[]) => {
+            const existing = prev.find(s => s.id === targetSid);
+            const fallbackBaseMessages = forcedBaseMessages ?? [];
+            const baseSession: ChatSession = existing ?? {
+                id: targetSid,
+                title: 'New Chat',
+                preview: '',
+                messages: fallbackBaseMessages,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                hasAttachments: false,
+                searchMode: 'none',
+                usedSearchModes: [],
+            };
 
-        const baseUrl = trimTrailingSlash(config.lmStudioEndpoint);
-        const chatUrl = `${baseUrl}/chat`;
+            const baseMessages = forcedBaseMessages ?? baseSession.messages;
+            const usedSearchModes = baseSession.usedSearchModes ? [...baseSession.usedSearchModes] : [];
+            if (finalSearchMode !== 'none' && !usedSearchModes.includes(finalSearchMode)) {
+                usedSearchModes.push(finalSearchMode);
+            }
+            const appended = includeUserMessage ? [userMsg, aiMsg] : [aiMsg];
+            const messages = [...baseMessages, ...appended];
+            const nextSession: ChatSession = {
+                ...baseSession,
+                messages,
+                searchMode: finalSearchMode !== 'none' ? finalSearchMode : baseSession.searchMode,
+                usedSearchModes,
+                hasAttachments: messages.some(m => (m.attachments?.length || 0) > 0),
+                updatedAt: new Date().toISOString(),
+                preview: content.slice(0, 60) || (attachments.length > 0 ? 'Image uploaded' : ''),
+                title: baseMessages.length === 0 ? content.slice(0, 30) + (content.length > 30 ? '...' : '') : baseSession.title
+            };
+
+            if (existing) {
+                return prev.map(s => s.id === targetSid ? nextSession : s);
+            }
+            return [nextSession, ...prev];
+        });
+
+        const chatUrl = `${LM_STUDIO_PROXY_BASE}/chat`;
         const createAbortController = () => {
             const controller = new AbortController();
             generation.controllers.add(controller);
@@ -673,7 +744,7 @@ export function ChatPage() {
             updateAiMessage(targetSid, aiMsgId, {
                 isStreaming: false,
                 responseTime: totalDur,
-                modelName: availableModels.find(m => m.id === config.defaultChatModelId)?.name || config.defaultChatModelId,
+                modelName: availableModels.find(m => m.id === resolvedChatModelId)?.name || resolvedChatModelId,
                 actionSuggestions: actionSuggestions.length > 0 ? actionSuggestions : undefined,
                 ...updates,
             });
@@ -683,8 +754,8 @@ export function ChatPage() {
             generateNextPromptSuggestionsWithModel(
                 effectiveContent,
                 fullContent,
-                trimTrailingSlash(config.lmStudioEndpoint),
-                config.defaultToolCallingModelId,
+                LM_STUDIO_PROXY_BASE,
+                resolvedToolModelId,
                 generation.controllers.values().next().value?.signal
             ).then(toolCallSuggestions => {
                 // Update with tool calling suggestions if we got better ones
@@ -1026,7 +1097,7 @@ export function ChatPage() {
 
                 const chatMatch = (() => {
                     for (const provider of providers) {
-                        const model = provider.chatModels?.find(m => m.key === config.defaultChatModelId);
+                        const model = provider.chatModels?.find(m => m.key === resolvedChatModelId);
                         if (model) return { providerId: provider.id, key: model.key };
                     }
 
@@ -1039,7 +1110,7 @@ export function ChatPage() {
 
                 const embeddingMatch = (() => {
                     for (const provider of providers) {
-                        const model = provider.embeddingModels?.find(m => m.key === config.defaultEmbeddingModelId);
+                        const model = provider.embeddingModels?.find(m => m.key === resolvedEmbeddingModelId);
                         if (model) return { providerId: provider.id, key: model.key };
                     }
 
@@ -1220,7 +1291,7 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                 reasoning?: 'low' | 'medium' | 'high';
                 previous_response_id?: string;
             } = {
-                model: config.defaultChatModelId || 'default',
+                model: resolvedChatModelId || 'default',
                 input: inputContent,
                 stream: true,
                 system_prompt: toolSystemInst,
@@ -1230,7 +1301,7 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
             if (previous_response_id) body.previous_response_id = previous_response_id;
             
             // Only send images directly if the chat model supports vision
-            const chatModel = availableModels.find(m => m.id === config.defaultChatModelId);
+            const chatModel = availableModels.find(m => m.id === resolvedChatModelId);
             const chatModelSupportsVision = chatModel?.capabilities.includes('vision');
             
             if (attachments.some(a => a.type === 'image') && chatModelSupportsVision) {
@@ -1264,8 +1335,32 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                     // ignore
                 }
 
+                const shouldRetryWithoutPreviousResponse =
+                    response.status === 400 &&
+                    Boolean(body.previous_response_id) &&
+                    (
+                        errorData?.error?.param === 'previous_response_id' ||
+                        errorData?.error?.message?.includes('previous_response_id') ||
+                        errorData?.error?.message?.includes('previous response')
+                    );
+
+                if (shouldRetryWithoutPreviousResponse) {
+                    delete body.previous_response_id;
+                    response = await fetch(chatUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        signal: createAbortController().signal,
+                        body: JSON.stringify(body)
+                    });
+
+                    if (!response.ok) {
+                        try { errorData = await response.json(); } catch { errorData = null; }
+                        throw new Error(`HTTP ${response.status}: ${errorData ? JSON.stringify(errorData) : 'Bad Request'}`);
+                    }
+                }
+
                 // If we get an error about unsupported reasoning, retry without it
-                if (response.status === 400 && body.reasoning && (errorData?.error?.param === 'reasoning' || errorData?.error?.message?.includes('reasoning'))) {
+                if (!response.ok && response.status === 400 && body.reasoning && (errorData?.error?.param === 'reasoning' || errorData?.error?.message?.includes('reasoning'))) {
                     localStorage.setItem(`no-reasoning-${body.model}`, 'true');
                     delete body.reasoning;
                     response = await fetch(chatUrl, {
@@ -1279,7 +1374,7 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                         try { errorData = await response.json(); } catch { errorData = null; }
                         throw new Error(`HTTP ${response.status}: ${errorData ? JSON.stringify(errorData) : 'Bad Request'}`);
                     }
-                } else {
+                } else if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${errorData ? JSON.stringify(errorData) : 'Bad Request'}`);
                 }
             }
@@ -1458,16 +1553,17 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
 
                 const imgs = attachments.filter(a => a.type === 'image');
                 if (imgs.length > 0) {
-                    const vRes = await fetch(`${baseUrl}/chat`, {
+                    const vRes = await fetch(chatUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         signal: createAbortController().signal,
                         body: JSON.stringify({
-                            model: config.defaultVisionModelId,
+                            model: resolvedVisionModelId,
                             input: [
                                 { type: 'text', content: toolArgs.prompt || 'Describe this image' },
                                 ...imgs.map(img => ({ type: 'image', data_url: img.dataUrl || img.url }))
-                            ]
+                            ],
+                            stream: false
                         })
                     });
 
@@ -1479,7 +1575,7 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                             headers: { 'Content-Type': 'application/json' },
                             signal: createAbortController().signal,
                             body: JSON.stringify({
-                                model: config.defaultChatModelId,
+                                model: resolvedChatModelId,
                                 input: `Vision tool result: ${vText}\n\nPlease summarize this for the user.`,
                                 previous_response_id: lastLmResponseId || undefined,
                                 stream: true

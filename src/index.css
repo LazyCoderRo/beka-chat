@@ -272,6 +272,8 @@ ol {
 html {
   font-size: calc(16px * var(--font-size-scale));
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -283,6 +285,14 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background-color var(--transition-normal), color var(--transition-normal);
+}
+
+@media (max-width: 900px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
 }
 
 /* ─── Scrollbar ──────────────────────────────────────────────────────────── */

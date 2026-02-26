@@ -6,7 +6,7 @@ import { Input } from '../shared/Input';
 import { UserAvatar } from './UserAvatar';
 import { X, Check } from 'lucide-react';
 
-const AVATAR_OPTIONS = Array.from({ length: 10 }, (_, i) => `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${i + 1}`);
+const AVATAR_OPTIONS = Array.from({ length: 12 }, (_, i) => `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${i + 1}`);
 
 export function ProfileManager() {
     const { user, updateProfile } = useAuth();

@@ -361,6 +361,62 @@ export async function generateNextPromptSuggestionsWithModel(
     toolCallingModelId: string,
     signal?: AbortSignal
 ): Promise<MessageActionSuggestion[]> {
+    const parseSuggestions = (rawContent: string): Array<{ label: string; description?: string }> => {
+        const cleaned = rawContent
+            .replace(/```json/gi, '```')
+            .replace(/```/g, '')
+            .trim();
+
+        const candidates: string[] = [];
+        if (cleaned) candidates.push(cleaned);
+
+        const jsonMatch = cleaned.match(/\[\s*\{[\s\S]*\}\s*\]/);
+        if (jsonMatch) candidates.push(jsonMatch[0]);
+
+        const firstBracket = cleaned.indexOf('[');
+        const lastBracket = cleaned.lastIndexOf(']');
+        if (firstBracket !== -1 && lastBracket > firstBracket) {
+            candidates.push(cleaned.slice(firstBracket, lastBracket + 1));
+        }
+
+        const normalizeLooseJson = (value: string): string => {
+            return value
+                .replace(/[“”]/g, '"')
+                .replace(/[‘’]/g, '\'')
+                .replace(/,\s*([}\]])/g, '$1')
+                .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3')
+                .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_, inner: string) => `"${inner.replace(/"/g, '\\"')}"`);
+        };
+
+        for (const candidate of candidates) {
+            for (const attempt of [candidate, normalizeLooseJson(candidate)]) {
+                try {
+                    const parsed = JSON.parse(attempt) as unknown;
+                    if (!Array.isArray(parsed)) continue;
+
+                    return parsed
+                        .map((item): { label: string; description?: string } | null => {
+                            if (!item || typeof item !== 'object') return null;
+                            const maybeLabel = (item as { label?: unknown }).label;
+                            const maybeDescription = (item as { description?: unknown }).description;
+                            if (typeof maybeLabel !== 'string' || maybeLabel.trim().length === 0) return null;
+                            return {
+                                label: maybeLabel.trim(),
+                                description: typeof maybeDescription === 'string' && maybeDescription.trim().length > 0
+                                    ? maybeDescription.trim()
+                                    : undefined
+                            };
+                        })
+                        .filter((item): item is { label: string; description?: string } => item !== null);
+                } catch {
+                    // Try next parse strategy.
+                }
+            }
+        }
+
+        return [];
+    };
+
     try {
         const systemPrompt = `You are a helpful assistant that suggests follow-up questions for conversations. 
 Generate exactly 3 diverse and helpful follow-up prompts that build on the conversation.
@@ -403,17 +459,11 @@ Generate 3 follow-up prompts as JSON array:`;
         const data = await response.json() as any;
         const content = data.output?.[0]?.content || data.choices?.[0]?.message?.content || data.content || data.result?.content || '';
 
-        // Extract JSON from response
-        const jsonMatch = content.match(/\[\s*\{[\s\S]*?\}\s*\]/);
-        if (!jsonMatch) {
-            console.warn('Could not extract JSON from model response');
+        const suggestions = parseSuggestions(content);
+        if (suggestions.length === 0) {
+            console.warn('Could not parse suggestions from model response');
             return [];
         }
-
-        const suggestions = JSON.parse(jsonMatch[0]) as Array<{
-            label: string;
-            description?: string;
-        }>;
 
         return suggestions.slice(0, 3).map((s, i) => ({
             id: `rec-toolcall-${Date.now()}-${i}`,

@@ -18,6 +18,15 @@ interface SessionContextValue {
     pinSession: (id: string) => void;
     renameSession: (id: string, newTitle: string) => void;
     setSessions: React.Dispatch<React.SetStateAction<ChatSession[]>>;
+    bulkSelectionEnabled: boolean;
+    selectedSessionIds: string[];
+    selectedCount: number;
+    areAllFilteredSelected: boolean;
+    toggleBulkSelection: () => void;
+    toggleSessionSelection: (id: string) => void;
+    selectAllFilteredSessions: () => void;
+    clearSessionSelection: () => void;
+    deleteSelectedSessions: () => void;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -91,6 +100,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const [searchQuery, setSearchQuery] = useState('');
     const [activeFilter, setActiveFilter] = useState<SessionFilter>('all');
     const [isLoaded, setIsLoaded] = useState(false);
+    const [bulkSelectionEnabled, setBulkSelectionEnabled] = useState(false);
+    const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
 
     useEffect(() => {
         if (!isAuthenticated) {
@@ -105,7 +116,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             .then(res => res.json())
             .then(data => {
                 if (data.sessions) {
-                    setSessions(data.sessions);
+                    setSessions(prev => {
+                        const remoteSessions = data.sessions as ChatSession[];
+                        if (prev.length === 0) return remoteSessions;
+
+                        const remoteIds = new Set(remoteSessions.map(session => session.id));
+                        const localOnlySessions = prev.filter(session => !remoteIds.has(session.id));
+                        return [...remoteSessions, ...localOnlySessions];
+                    });
                 }
                 setIsLoaded(true);
             })
@@ -142,6 +160,55 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         () => applyFilter(sessions, activeFilter, searchQuery),
         [sessions, activeFilter, searchQuery]
     );
+
+    useEffect(() => {
+        setSelectedSessionIds(prev => prev.filter(id => sessions.some(s => s.id === id)));
+    }, [sessions]);
+
+    const toggleBulkSelection = () => {
+        setBulkSelectionEnabled(prev => {
+            if (prev) setSelectedSessionIds([]);
+            return !prev;
+        });
+    };
+
+    const toggleSessionSelection = (id: string) => {
+        setSelectedSessionIds(prev =>
+            prev.includes(id) ? prev.filter(existing => existing !== id) : [...prev, id]
+        );
+    };
+
+    const selectAllFilteredSessions = () => {
+        setSelectedSessionIds(filteredSessions.map(s => s.id));
+    };
+
+    const clearSessionSelection = () => {
+        setSelectedSessionIds([]);
+    };
+
+    const deleteSelectedSessions = () => {
+        if (selectedSessionIds.length === 0) return;
+
+        const idsToDelete = [...selectedSessionIds];
+        setSessions(prev => prev.filter(s => !idsToDelete.includes(s.id)));
+        if (activeSessionId && idsToDelete.includes(activeSessionId)) {
+            setActiveSessionId(null);
+        }
+        setSelectedSessionIds([]);
+        setBulkSelectionEnabled(false);
+
+        const token = localStorage.getItem('token');
+        idsToDelete.forEach(id => {
+            fetch(`/api/sessions/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            }).catch(console.error);
+        });
+    };
+
+    const selectedCount = selectedSessionIds.length;
+    const areAllFilteredSelected = filteredSessions.length > 0
+        && filteredSessions.every(session => selectedSessionIds.includes(session.id));
 
     const createNewSession = (): string => {
         const id = generateId();
@@ -201,6 +268,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             filteredSessions, activeSession,
             createNewSession, deleteSession, pinSession, renameSession,
             setSessions,
+            bulkSelectionEnabled,
+            selectedSessionIds,
+            selectedCount,
+            areAllFilteredSelected,
+            toggleBulkSelection,
+            toggleSessionSelection,
+            selectAllFilteredSessions,
+            clearSessionSelection,
+            deleteSelectedSessions,
         }}>
             {children}
         </SessionContext.Provider>

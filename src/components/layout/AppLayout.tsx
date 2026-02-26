@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { AdminPage } from '../../pages/AdminPage';
 
 export function AppLayout() {
+    const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
     const [profileModal, setProfileModal] = useState<{ isOpen: boolean; tab: string }>({
         isOpen: false,
         tab: 'profile'
@@ -29,9 +30,20 @@ export function AppLayout() {
             <Sidebar
                 onOpenAdmin={() => setIsAdminOpen(true)}
                 onOpenProfile={() => openProfile()}
+                mobileOpen={isMobileSidebarOpen}
+                onRequestCloseMobile={() => setIsMobileSidebarOpen(false)}
+            />
+            <button
+                type="button"
+                className={`bk-app-backdrop ${isMobileSidebarOpen ? 'bk-app-backdrop--visible' : ''}`}
+                onClick={() => setIsMobileSidebarOpen(false)}
+                aria-label="Close sidebar"
             />
             <div className="bk-app-main">
-                <Header onOpenProfile={openProfile} />
+                <Header
+                    onOpenProfile={openProfile}
+                    onToggleSidebar={() => setIsMobileSidebarOpen(open => !open)}
+                />
                 <div className="bk-app-content">
                     <Outlet />
                 </div>
@@ -57,4 +69,3 @@ export function AppLayout() {
         </div>
     );
 }
-

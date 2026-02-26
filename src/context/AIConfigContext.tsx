@@ -50,16 +50,29 @@ const DEFAULT_CONFIG: AIConfig = {
     reasoningLevel: 'medium',
 };
 
+const LM_STUDIO_PROXY_BASE = '/api/lmstudio';
+const FIXED_ENDPOINTS = {
+    lmStudioEndpoint: DEFAULT_CONFIG.lmStudioEndpoint,
+    perplexicaEndpoint: DEFAULT_CONFIG.perplexicaEndpoint,
+};
+
+function withFixedEndpoints(config: AIConfig): AIConfig {
+    return {
+        ...config,
+        ...FIXED_ENDPOINTS,
+    };
+}
+
 const AIConfigContext = createContext<AIConfigContextValue | null>(null);
 
 export function AIConfigProvider({ children }: { children: ReactNode }) {
     const [config, setConfig] = useState<AIConfig>(() => {
         const saved = localStorage.getItem('bk-ai-config');
-        if (!saved) return DEFAULT_CONFIG;
+        if (!saved) return withFixedEndpoints(DEFAULT_CONFIG);
         try {
-            return { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
+            return withFixedEndpoints({ ...DEFAULT_CONFIG, ...JSON.parse(saved) });
         } catch {
-            return DEFAULT_CONFIG;
+            return withFixedEndpoints(DEFAULT_CONFIG);
         }
     });
 
@@ -71,7 +84,7 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
     const lastActivityRef = useRef<number>(Date.now());
 
     useEffect(() => {
-        localStorage.setItem('bk-ai-config', JSON.stringify(config));
+        localStorage.setItem('bk-ai-config', JSON.stringify(withFixedEndpoints(config)));
     }, [config]);
 
     // Track user activity
@@ -96,15 +109,22 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
         fetch('/api/admin/settings')
             .then(res => res.ok ? res.json() : {})
             .then(dbSettings => {
-                if (Object.keys(dbSettings).length > 0) {
-                    setConfig(prev => ({ ...prev, ...dbSettings }));
+                const settings = (dbSettings || {}) as Record<string, unknown>;
+                if (Object.keys(settings).length > 0) {
+                    const { lmStudioEndpoint, perplexicaEndpoint, ...rest } = settings;
+                    void lmStudioEndpoint;
+                    void perplexicaEndpoint;
+                    setConfig(prev => withFixedEndpoints({ ...prev, ...rest } as AIConfig));
                 }
             })
             .catch(err => console.error('Failed to load settings from DB:', err));
     }, []);
 
     const updateConfig = async (newConfig: Partial<AIConfig>) => {
-        const mergedConfig = { ...config, ...newConfig };
+        const { lmStudioEndpoint, perplexicaEndpoint, ...restConfig } = newConfig;
+        void lmStudioEndpoint;
+        void perplexicaEndpoint;
+        const mergedConfig = withFixedEndpoints({ ...config, ...restConfig });
         setConfig(mergedConfig);
 
         try {
@@ -116,7 +136,7 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                     },
-                    body: JSON.stringify(newConfig)
+                    body: JSON.stringify(restConfig)
                 });
             }
         } catch (err) {
@@ -127,7 +147,7 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
     const fetchModels = useCallback(async () => {
         setIsLoadingModels(true);
         try {
-            const response = await fetch(`${config.lmStudioEndpoint}/models`);
+            const response = await fetch(`${LM_STUDIO_PROXY_BASE}/models`);
             if (!response.ok) throw new Error('Failed to fetch models');
             const data = await response.json() as { models?: Array<Record<string, unknown>> };
 
@@ -175,7 +195,7 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
         } finally {
             setIsLoadingModels(false);
         }
-    }, [config, serverModelStates]);
+    }, [config.defaultChatModelId, config.defaultEmbeddingModelId, config.defaultVisionModelId, config.reasoningLevel, serverModelStates]);
 
     // Polling for server model status
     useEffect(() => {
@@ -293,7 +313,7 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
             }
 
             // 1. Load on LM Studio
-            const response = await fetch(`${config.lmStudioEndpoint}/models/load`, {
+            const response = await fetch(`${LM_STUDIO_PROXY_BASE}/models/load`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

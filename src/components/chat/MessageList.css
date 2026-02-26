@@ -14,3 +14,13 @@
     max-width: 1200px;
     margin: 0 auto;
 }
+
+@media (max-width: 900px) {
+    .bk-msg-list {
+        padding: var(--space-4) var(--space-2);
+    }
+
+    .bk-msg-list__inner {
+        gap: var(--space-6);
+    }
+}

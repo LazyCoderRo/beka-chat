@@ -162,3 +162,16 @@
 .animate-spin {
     animation: spin 1s linear infinite;
 }
+
+@media (max-width: 900px) {
+    .bk-task-drawer {
+        right: var(--space-2);
+        left: var(--space-2);
+        top: calc(var(--header-height) + var(--space-2));
+        width: auto;
+    }
+
+    .bk-task-drawer__list {
+        max-height: 50vh;
+    }
+}

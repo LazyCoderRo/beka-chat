@@ -20,11 +20,21 @@ function formatDate(iso: string) {
 }
 
 export function SessionItem({ session }: SessionItemProps) {
-    const { activeSessionId, setActiveSessionId, deleteSession, pinSession, renameSession } = useSession();
+    const {
+        activeSessionId,
+        setActiveSessionId,
+        deleteSession,
+        pinSession,
+        renameSession,
+        bulkSelectionEnabled,
+        selectedSessionIds,
+        toggleSessionSelection
+    } = useSession();
     const [isEditing, setIsEditing] = useState(false);
     const [editValue, setEditValue] = useState(session.title);
     const inputRef = useRef<HTMLInputElement>(null);
     const isActive = activeSessionId === session.id;
+    const isSelected = selectedSessionIds.includes(session.id);
 
     useEffect(() => {
         if (isEditing) {
@@ -50,9 +60,27 @@ export function SessionItem({ session }: SessionItemProps) {
 
     return (
         <div
-            className={`bk-session-item ${isActive ? 'bk-session-item--active' : ''}`}
-            onClick={() => setActiveSessionId(session.id)}
+            className={`bk-session-item ${isActive ? 'bk-session-item--active' : ''} ${bulkSelectionEnabled ? 'bk-session-item--bulk' : ''} ${isSelected ? 'bk-session-item--selected' : ''}`}
+            onClick={() => {
+                if (bulkSelectionEnabled) {
+                    toggleSessionSelection(session.id);
+                    return;
+                }
+                setActiveSessionId(session.id);
+            }}
         >
+            {bulkSelectionEnabled && (
+                <div className="bk-session-item__select-wrap" onClick={e => e.stopPropagation()}>
+                    <input
+                        type="checkbox"
+                        className="bk-session-item__checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSessionSelection(session.id)}
+                        aria-label={`Select chat ${session.title}`}
+                    />
+                </div>
+            )}
+
             <div className="bk-session-item__body">
                 <div className="bk-session-item__top">
                     {isEditing ? (

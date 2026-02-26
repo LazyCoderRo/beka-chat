@@ -3,6 +3,7 @@
     height: 100vh;
     overflow: hidden;
     background: var(--bg-base);
+    position: relative;
 }
 
 .bk-app-main {
@@ -18,4 +19,31 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
+}
+
+.bk-app-backdrop {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    .bk-app-main {
+        width: 100%;
+    }
+
+    .bk-app-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 280;
+        background: rgba(0, 0, 0, 0.45);
+        border: none;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--transition-fast);
+        display: block;
+    }
+
+    .bk-app-backdrop--visible {
+        opacity: 1;
+        pointer-events: auto;
+    }
 }

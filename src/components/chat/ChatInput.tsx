@@ -219,6 +219,10 @@ export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disab
         contextRatio > 0.9 ? 'bk-chat-input__stat--danger' :
             contextRatio > 0.7 ? 'bk-chat-input__stat--warn' :
                 'bk-chat-input__stat--ok';
+    const contextHintToneClass =
+        contextRatio > 0.9 ? 'bk-chat-input__hint-context--danger' :
+            contextRatio > 0.7 ? 'bk-chat-input__hint-context--warn' :
+                'bk-chat-input__hint-context--ok';
 
     return (
         <div
@@ -227,6 +231,18 @@ export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disab
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
         >
+            {searchMode !== 'none' && (
+                <div className="bk-chat-input__active-mode-row">
+                    <div className={`bk-chat-input__mode-badge bk-chat-input__mode-badge--${searchMode}`}>
+                        {searchMode === 'web' ? <Globe size={11} /> : <Zap size={11} />}
+                        <span>{searchMode === 'web' ? 'Web Search' : 'Deep Search'}</span>
+                        <button onClick={() => setSearchMode('none')} aria-label="Clear search mode">
+                            <X size={11} />
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Prompt Suggestions - displayed above input */}
             {promptSuggestions.length > 0 && (
                 <div className="bk-chat-input__prompt-suggestions">
@@ -298,7 +314,11 @@ export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disab
 
                         {(() => {
                             const rule = getRuleForModel(selectedModelId);
-                            return rule?.hasReasoningLevel && <ReasoningSelector />;
+                            return rule?.hasReasoningLevel && (
+                                <div className="bk-chat-input__reasoning-wrap">
+                                    <ReasoningSelector />
+                                </div>
+                            );
                         })()}
 
                         <div className="bk-chat-input__divider" />
@@ -329,7 +349,7 @@ export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disab
 
                         {/* Mic button - disabled */}
                         <button
-                            className="bk-chat-input__tool-btn"
+                            className="bk-chat-input__tool-btn bk-chat-input__record-btn"
                             title="Voice recording disabled"
                             disabled={true}
                         >
@@ -340,7 +360,7 @@ export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disab
                         <div className="bk-chat-input__divider" />
 
                         {/* Auto-send Checkbox */}
-                        <label className="bk-chat-input__auto-send">
+                        <label className="bk-chat-input__auto-send bk-chat-input__auto-send--mobile-hidden">
                             <input
                                 type="checkbox"
                                 className="bk-chat-input__checkbox"
@@ -350,16 +370,6 @@ export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disab
                             Auto-send
                         </label>
 
-                        {/* Active mode indicator */}
-                        {searchMode !== 'none' && (
-                            <div className={`bk-chat-input__mode-badge bk-chat-input__mode-badge--${searchMode}`}>
-                                {searchMode === 'web' ? <Globe size={11} /> : <Zap size={11} />}
-                                <span>{searchMode === 'web' ? 'Web Search' : 'Deep Search'}</span>
-                                <button onClick={() => setSearchMode('none')} aria-label="Clear search mode">
-                                    <X size={11} />
-                                </button>
-                            </div>
-                        )}
                     </div>
 
                     <div className="bk-chat-input__right">
@@ -406,7 +416,12 @@ export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disab
                     </div>
                 </div>
             </div>
-            <p className="bk-chat-input__hint">Enter to send · Shift+Enter for new line</p>
+            <p className="bk-chat-input__hint">
+                <span>Enter to send · Shift+Enter for new line</span>
+                <span className={`bk-chat-input__hint-context ${contextHintToneClass}`}>
+                    · {estimatedContextTokens.toLocaleString()} / {maxContext.toLocaleString()}
+                </span>
+            </p>
         </div>
     );
 }

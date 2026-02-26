@@ -1,6 +1,6 @@
 import './Sidebar.css';
-import { useState } from 'react';
-import { Plus, PanelLeftClose, PanelLeft, Bot, Settings as SettingsIcon } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Plus, PanelLeftClose, PanelLeft, Bot, Settings as SettingsIcon, ListChecks, CheckSquare, Square, Trash2 } from 'lucide-react';
 import { SessionSearch } from '../session/SessionSearch';
 import { SessionFilters } from '../session/SessionFilters';
 import { SessionList } from '../session/SessionList';
@@ -8,24 +8,52 @@ import { UserAvatar } from '../profile/UserAvatar';
 import { Button } from '../shared/Button';
 import { useSession } from '../../context/SessionContext';
 import { useAuth } from '../../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { TypographySelector } from './TypographySelector';
 
 interface SidebarProps {
     onOpenAdmin?: () => void;
     onOpenProfile?: () => void;
+    mobileOpen?: boolean;
+    onRequestCloseMobile?: () => void;
 }
 
-export function Sidebar({ onOpenAdmin, onOpenProfile }: SidebarProps) {
+export function Sidebar({ onOpenAdmin, onOpenProfile, mobileOpen = false, onRequestCloseMobile }: SidebarProps) {
     const [collapsed, setCollapsed] = useState(false);
-    const { createNewSession } = useSession();
+    const {
+        createNewSession,
+        bulkSelectionEnabled,
+        selectedCount,
+        areAllFilteredSelected,
+        toggleBulkSelection,
+        selectAllFilteredSessions,
+        clearSessionSelection,
+        deleteSelectedSessions
+    } = useSession();
     const { user } = useAuth();
+    const location = useLocation();
+    const previousPathnameRef = useRef(location.pathname);
     const navigate = useNavigate();
 
-    const handleNewChat = () => { createNewSession(); navigate('/chat'); };
+    const closeMobileSidebar = () => {
+        onRequestCloseMobile?.();
+    };
+
+    const handleNewChat = () => {
+        createNewSession();
+        navigate('/chat');
+        closeMobileSidebar();
+    };
+
+    useEffect(() => {
+        if (previousPathnameRef.current === location.pathname) return;
+        previousPathnameRef.current = location.pathname;
+        if (mobileOpen) onRequestCloseMobile?.();
+        // Close mobile drawer after navigation to avoid split screen on phones.
+    }, [location.pathname, mobileOpen, onRequestCloseMobile]);
 
     return (
-        <aside className={`bk-sidebar ${collapsed ? 'bk-sidebar--collapsed' : ''}`}>
+        <aside className={`bk-sidebar ${collapsed ? 'bk-sidebar--collapsed' : ''} ${mobileOpen ? 'bk-sidebar--mobile-open' : ''}`}>
             <div className="bk-sidebar__header">
                 {!collapsed && (
                     <div className="bk-sidebar__brand">
@@ -57,17 +85,51 @@ export function Sidebar({ onOpenAdmin, onOpenProfile }: SidebarProps) {
 
                     <SessionList />
 
+                    <div className="bk-sidebar__bulk-actions">
+                        <button
+                            type="button"
+                            className={`bk-sidebar__bulk-btn ${bulkSelectionEnabled ? 'active' : ''}`}
+                            onClick={toggleBulkSelection}
+                            title={bulkSelectionEnabled ? 'Exit bulk selection' : 'Activate bulk selection'}
+                        >
+                            <ListChecks size={14} />
+                            <span>{bulkSelectionEnabled ? 'Exit bulk' : 'Bulk select'}</span>
+                        </button>
+
+                        <button
+                            type="button"
+                            className="bk-sidebar__bulk-btn"
+                            onClick={areAllFilteredSelected ? clearSessionSelection : selectAllFilteredSessions}
+                            disabled={!bulkSelectionEnabled}
+                            title={areAllFilteredSelected ? 'Deselect all visible chats' : 'Select all visible chats'}
+                        >
+                            {areAllFilteredSelected ? <Square size={14} /> : <CheckSquare size={14} />}
+                            <span>{areAllFilteredSelected ? 'Deselect all' : 'Select all'}</span>
+                        </button>
+
+                        <button
+                            type="button"
+                            className="bk-sidebar__bulk-btn bk-sidebar__bulk-btn--danger"
+                            onClick={deleteSelectedSessions}
+                            disabled={!bulkSelectionEnabled || selectedCount === 0}
+                            title="Delete selected chats"
+                        >
+                            <Trash2 size={14} />
+                            <span>{selectedCount > 0 ? `Delete (${selectedCount})` : 'Delete selected'}</span>
+                        </button>
+                    </div>
+
                     <TypographySelector />
 
                     {user?.role === 'admin' && (
-                        <div className="bk-sidebar__nav-item" onClick={onOpenAdmin} style={{ cursor: 'pointer', padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--bk-text-secondary)', transition: 'all 0.2s' }}>
+                        <div className="bk-sidebar__nav-item" onClick={() => { onOpenAdmin?.(); closeMobileSidebar(); }} style={{ cursor: 'pointer', padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--bk-text-secondary)', transition: 'all 0.2s' }}>
                             <SettingsIcon size={18} />
                             {!collapsed && <span style={{ fontSize: '0.875rem' }}>Admin Settings</span>}
                         </div>
                     )}
 
                     {user && (
-                        <div className="bk-sidebar__footer" onClick={onOpenProfile} style={{ cursor: 'pointer' }}>
+                        <div className="bk-sidebar__footer" onClick={() => { onOpenProfile?.(); closeMobileSidebar(); }} style={{ cursor: 'pointer' }}>
                             <UserAvatar user={user} size="sm" showStatus />
                             <div className="bk-sidebar__footer-info">
                                 <span className="bk-sidebar__footer-name">{user.name}</span>

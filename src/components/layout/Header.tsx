@@ -4,12 +4,14 @@ import { UserAvatar } from '../profile/UserAvatar';
 import { ProfileDropdown } from '../profile/ProfileDropdown';
 import { useAuth } from '../../context/AuthContext';
 import { useState, useRef, useEffect } from 'react';
+import { PanelLeft } from 'lucide-react';
 
 interface HeaderProps {
     onOpenProfile: () => void;
+    onToggleSidebar: () => void;
 }
 
-export function Header({ onOpenProfile }: HeaderProps) {
+export function Header({ onOpenProfile, onToggleSidebar }: HeaderProps) {
     const { user } = useAuth();
     const [profileOpen, setProfileOpen] = useState(false);
     const profileRef = useRef<HTMLDivElement>(null);
@@ -28,7 +30,14 @@ export function Header({ onOpenProfile }: HeaderProps) {
     return (
         <header className="bk-header">
             <div className="bk-header__left">
-                {/* ModelSelector moved to ChatInput */}
+                <button
+                    type="button"
+                    className="bk-header__menu-btn"
+                    onClick={onToggleSidebar}
+                    aria-label="Toggle sidebar"
+                >
+                    <PanelLeft size={18} />
+                </button>
             </div>
 
             <div className="bk-header__right">
@@ -52,4 +61,3 @@ export function Header({ onOpenProfile }: HeaderProps) {
         </header>
     );
 }
-
