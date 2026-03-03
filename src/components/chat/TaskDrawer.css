@@ -69,6 +69,69 @@
     background: var(--bg-base);
 }
 
+.bk-task-drawer__export-menu {
+    position: relative;
+}
+
+.bk-task-drawer__export-button {
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+    color: var(--text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: var(--transition-base);
+}
+
+.bk-task-drawer__export-button:hover {
+    color: var(--text-primary);
+    background: var(--bg-base);
+    border-color: var(--accent-primary);
+}
+
+.bk-task-drawer__export-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    margin-top: var(--space-2);
+    min-width: 160px;
+    z-index: 10;
+}
+
+.bk-task-drawer__export-option {
+    display: block;
+    width: 100%;
+    padding: var(--space-3) var(--space-4);
+    background: none;
+    border: none;
+    text-align: left;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: var(--transition-base);
+}
+
+.bk-task-drawer__export-option:first-child {
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.bk-task-drawer__export-option:last-child {
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+.bk-task-drawer__export-option:hover {
+    background: var(--bg-elevated);
+    color: var(--accent-primary);
+}
+
 .bk-task-drawer__current-step {
     display: flex;
     flex-direction: column;

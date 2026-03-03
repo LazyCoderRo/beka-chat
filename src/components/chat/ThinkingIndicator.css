@@ -1,0 +1,70 @@
+.bk-thinking-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    background: var(--accent-primary-bg);
+    color: var(--accent-primary);
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    font-weight: var(--weight-semi);
+    margin: var(--space-3) 0;
+}
+
+.bk-thinking-indicator__icon {
+    flex-shrink: 0;
+    animation: bk-thinking-pulse 2s ease-in-out infinite;
+}
+
+@keyframes bk-thinking-pulse {
+    0%, 100% {
+        opacity: 0.6;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.1);
+    }
+}
+
+.bk-thinking-indicator__text {
+    flex: 1;
+}
+
+.bk-thinking-indicator__dots {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+}
+
+.bk-thinking-indicator__dot {
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    background: var(--accent-primary);
+    border-radius: 50%;
+    animation: bk-dot-bounce 1.4s infinite ease-in-out both;
+}
+
+.bk-thinking-indicator__dot:nth-child(1) {
+    animation-delay: -0.32s;
+}
+
+.bk-thinking-indicator__dot:nth-child(2) {
+    animation-delay: -0.16s;
+}
+
+.bk-thinking-indicator__dot:nth-child(3) {
+    animation-delay: 0s;
+}
+
+@keyframes bk-dot-bounce {
+    0%, 80%, 100% {
+        opacity: 0.6;
+        transform: scale(1);
+    }
+    40% {
+        opacity: 1;
+        transform: scale(1.2);
+    }
+}

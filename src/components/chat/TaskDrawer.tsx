@@ -1,6 +1,7 @@
 import './TaskDrawer.css';
 import { useEffect, useState } from 'react';
-import { Loader2, CheckCircle2, AlertCircle, Eye, Globe, Zap, FileSearch, X } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle, Eye, Globe, Zap, FileSearch, X, Download } from 'lucide-react';
+import { Button } from '../shared/Button';
 import type { ToolCall } from '../../types';
 
 interface TaskDrawerProps {
@@ -9,10 +10,15 @@ interface TaskDrawerProps {
     title?: string;
     currentStep?: string;
     onClose?: () => void;
+    onExport?: (format: 'json' | 'markdown') => void;
+    tasksTotalCount?: number;
 }
 
-export function TaskDrawer({ tasks, isVisible, title = 'Active Tasks', currentStep, onClose }: TaskDrawerProps) {
+export function TaskDrawer({ tasks, isVisible, title = 'Active Tasks', currentStep, onClose, onExport }: TaskDrawerProps) {
     const [shouldRender, setShouldRender] = useState(isVisible);
+    const [showExportMenu, setShowExportMenu] = useState(false);
+    const isDeepResearch = tasks.some(t => t.type === 'deep_search');
+    const isComplete = tasks.every(t => t.status === 'done' || t.status === 'error');
 
     useEffect(() => {
         if (isVisible) {
@@ -31,6 +37,40 @@ export function TaskDrawer({ tasks, isVisible, title = 'Active Tasks', currentSt
                 <h3 className="bk-task-drawer__title">{title}</h3>
                 <div className="bk-task-drawer__header-right">
                     <span className="bk-task-drawer__count">{tasks.length}</span>
+                    {onExport && isDeepResearch && isComplete && (
+                        <div className="bk-task-drawer__export-menu">
+                            <button
+                                className="bk-task-drawer__export-button"
+                                onClick={() => setShowExportMenu(!showExportMenu)}
+                                title="Export research"
+                                aria-label="Export research"
+                            >
+                                <Download size={14} />
+                            </button>
+                            {showExportMenu && (
+                                <div className="bk-task-drawer__export-dropdown">
+                                    <button
+                                        className="bk-task-drawer__export-option"
+                                        onClick={() => {
+                                            onExport('markdown');
+                                            setShowExportMenu(false);
+                                        }}
+                                    >
+                                        Export as Markdown
+                                    </button>
+                                    <button
+                                        className="bk-task-drawer__export-option"
+                                        onClick={() => {
+                                            onExport('json');
+                                            setShowExportMenu(false);
+                                        }}
+                                    >
+                                        Export as JSON
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
                     {onClose && (
                         <button className="bk-task-drawer__close" onClick={onClose} aria-label="Close task drawer">
                             <X size={14} />

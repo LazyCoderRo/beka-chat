@@ -44,6 +44,18 @@ export interface ToolCall {
   duration?: number; // in ms
 }
 
+// ─── Research Questions ──────────────────────────────────────────────────────
+
+export interface ResearchQuestion {
+  id: string;
+  question: string;
+  type: 'yesno' | 'text' | 'select';
+  required: boolean;
+  options?: string[];
+  placeholder?: string;
+  answer?: string | boolean;
+}
+
 // ─── Web Search ──────────────────────────────────────────────────────────────
 
 export interface WebSearchSource {

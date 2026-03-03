@@ -6,14 +6,21 @@ import { ChatInput } from '../components/chat/ChatInput';
 import { WelcomeScreen } from '../components/chat/WelcomeScreen';
 import { TaskDrawer } from '../components/chat/TaskDrawer';
 import { ContextNotification } from '../components/chat/ContextNotification';
+import { DeepResearchQuestionsModal } from '../components/chat/DeepResearchQuestionsModal';
+import { ResearchFindingsPanel } from '../components/chat/ResearchFindingsPanel';
+import { ModelThinkingPanel } from '../components/chat/ModelThinkingPanel';
+import { ThinkingIndicator } from '../components/chat/ThinkingIndicator';
 import { useAIConfig } from '../context/AIConfigContext';
 import { useAuth } from '../context/AuthContext';
 import { ImageModal } from '../components/shared/ImageModal';
 import { Spinner } from '../components/shared/Spinner';
 import { archiveMessagesWithSummary, calculateContextTokens, getContextMessagesForAPI } from '../utils/contextManager';
 import { getSmartRecommendations, recommendationsToActionSuggestions, generateNextPromptSuggestionsWithModel } from '../utils/smartRecommendations';
+import { generateResearchQuestions } from '../utils/generateResearchQuestions';
+import { downloadResearchTrace, captureResearchTrace } from '../utils/exportResearchTrace';
 import { copyToClipboardSafe } from '../utils/clipboard';
-import type { AIModel, FileAttachment, SearchMode, ChatSession, Message, ToolCall, WebSearchSource, MessageActionSuggestion } from '../types';
+import type { AIModel, FileAttachment, SearchMode, ChatSession, Message, ToolCall, WebSearchSource, MessageActionSuggestion, ResearchQuestion } from '../types';
+import type { ResearchFinding } from '../components/chat/ResearchFindingsPanel';
 
 interface PerplexicaModel {
     key: string;
@@ -56,6 +63,7 @@ interface DeepResearchDrawerState {
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120000;
 const TOOL_REQUEST_TIMEOUT_MS = 60000;
+const DEEP_RESEARCH_TIMEOUT_MS = 600000; // 10 minutes for deep research to allow long model thinking
 
 interface SearchDecision {
     mode: 'none' | 'webpage' | 'web' | 'deep';
@@ -523,6 +531,15 @@ export function ChatPage() {
         currentStep: '',
         tasks: []
     });
+    const [deepResearchQuestions, setDeepResearchQuestions] = useState<ResearchQuestion[]>([]);
+    const [deepResearchQuestionsOpen, setDeepResearchQuestionsOpen] = useState(false);
+    const [pendingDeepResearchTopic, setPendingDeepResearchTopic] = useState<string>('');
+    const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
+    const [researchFindings, setResearchFindings] = useState<ResearchFinding[]>([]);
+    const [isThinkingVisible, setIsThinkingVisible] = useState(false);
+    const [modelThinkingSteps, setModelThinkingSteps] = useState<Array<{ stepId: string; content: string; isStreaming: boolean }>>([]);
+    const [currentDeepResearchTopic, setCurrentDeepResearchTopic] = useState<string>('');
+    const [currentDeepResearchSources, setCurrentDeepResearchSources] = useState<WebSearchSource[]>([]);
     const activeGenerationRef = useRef<ActiveGeneration | null>(null);
 
     const updateAiMessage = (sessionId: string, msgId: string, updates: Partial<Message>) => {
@@ -579,6 +596,109 @@ export function ChatPage() {
 
     const setDeepResearchStep = (currentStep: string) => {
         setDeepResearchDrawer(prev => ({ ...prev, isVisible: true, currentStep }));
+    };
+
+    const initiateDeepResearchWithQuestions = async (topic: string) => {
+        setPendingDeepResearchTopic(topic);
+        setIsGeneratingQuestions(true);
+
+        try {
+            const controller = new AbortController();
+            const timeoutId = window.setTimeout(() => controller.abort(), 30000); // 30s timeout for questions generation
+
+            const questions = await generateResearchQuestions({
+                topic,
+                modelId: availableModels.find(m => m.isLoaded)?.id || config.defaultChatModelId,
+                signal: controller.signal,
+                proxyBase: '/api/lmstudio'
+            });
+
+            window.clearTimeout(timeoutId);
+            
+            setDeepResearchQuestions(questions.length > 0 ? questions : getDefaultQuestions(topic));
+            setDeepResearchQuestionsOpen(true);
+        } catch (error) {
+            console.error('Error generating research questions:', error);
+            setDeepResearchQuestions(getDefaultQuestions(topic));
+            setDeepResearchQuestionsOpen(true);
+        } finally {
+            setIsGeneratingQuestions(false);
+        }
+    };
+
+    const handleDeepResearchQuestionsSubmit = (answers: Record<string, string | boolean>) => {
+        setDeepResearchQuestionsOpen(false);
+
+        // Build enhanced query with answers
+        let enhancedQuery = pendingDeepResearchTopic;
+        const answerTexts: string[] = [];
+
+        for (const [_, value] of Object.entries(answers)) {
+            if (value === true) {
+                answerTexts.push('Include this consideration');
+            } else if (value === false) {
+                // Skip false answers
+            } else if (typeof value === 'string' && value.trim()) {
+                answerTexts.push(value.trim());
+            }
+        }
+
+        if (answerTexts.length > 0) {
+            enhancedQuery = `${pendingDeepResearchTopic}\n\nResearch context/preferences:\n${answerTexts.join('\n')}`;
+        }
+
+        // Proceed with deep research using the enhanced query
+        handleSend(enhancedQuery, [], 'deep', undefined, undefined, {
+            forceSearchMode: 'deep',
+            bypassPrompt: true
+        });
+
+        setPendingDeepResearchTopic('');
+    };
+
+    const getDefaultQuestions = (topic: string): ResearchQuestion[] => {
+        return [
+            {
+                id: 'q1',
+                question: `Are you looking for recent/current information about "${topic}"?`,
+                type: 'yesno',
+                required: true
+            },
+            {
+                id: 'q2',
+                question: 'Should I include academic/technical sources?',
+                type: 'yesno',
+                required: false
+            },
+            {
+                id: 'q3',
+                question: 'Any specific focus area or industry?',
+                type: 'text',
+                placeholder: 'e.g., healthcare, business development, research...',
+                required: false
+            }
+        ];
+    };
+
+    const handleExportResearchTrace = (format: 'json' | 'markdown') => {
+        if (!activeSession) return;
+
+        // Find the assistant message with the final answer
+        const lastAssistantMsg = [...activeSession.messages]
+            .reverse()
+            .find(m => m.role === 'assistant' && m.content);
+
+        if (!lastAssistantMsg) return;
+
+        // Create research trace
+        const trace = captureResearchTrace(
+            currentDeepResearchTopic || 'Research',
+            deepResearchDrawer.tasks,
+            currentDeepResearchSources,
+            lastAssistantMsg.content || ''
+        );
+
+        downloadResearchTrace(trace, format);
     };
 
     const handleStopGeneration = () => {
@@ -988,9 +1108,24 @@ export function ChatPage() {
         const finalSearchMode: SearchMode = options?.forceSearchMode
             || (strategy.mode === 'web' || strategy.mode === 'deep' ? strategy.mode : 'none');
 
+        // If deep research is initiated and questions haven't been forcefully bypassed, show questions first
+        if (finalSearchMode === 'deep' && !options?.forceSearchMode && !deepResearchQuestionsOpen && !deepResearchQuestions.length) {
+            // Don't proceed yet - instead show the questions modal
+            initiateDeepResearchWithQuestions(effectiveContent);
+            return;
+        }
+
         if (finalSearchMode !== 'deep') {
             resetDeepResearchDrawer();
+            setResearchFindings([]);
+            setModelThinkingSteps([]);
         } else {
+            // Reset old findings and set current topic for export  
+            setCurrentDeepResearchTopic(effectiveContent);
+            setCurrentDeepResearchSources([]);
+            setResearchFindings([]);
+            setModelThinkingSteps([]);
+            setIsThinkingVisible(true);
             setDeepResearchDrawer(prev => ({
                 isVisible: true,
                 currentStep: prev.currentStep || 'Initializing deep research...',
@@ -1152,22 +1287,26 @@ export function ChatPage() {
         const createAbortController = () => {
             const controller = new AbortController();
             generation.controllers.add(controller);
+            // Use longer timeout for deep research to allow model thinking time
+            const timeoutDuration = finalSearchMode === 'deep' ? DEEP_RESEARCH_TIMEOUT_MS : DEFAULT_REQUEST_TIMEOUT_MS;
             const timeoutId = window.setTimeout(() => {
                 if (controller.signal.aborted) return;
                 timeoutTriggered = true;
                 controller.abort();
-            }, DEFAULT_REQUEST_TIMEOUT_MS);
+            }, timeoutDuration);
             abortTimeoutIds.set(controller, timeoutId);
             return controller;
         };
         const createToolAbortController = () => {
             const controller = new AbortController();
             generation.controllers.add(controller);
+            // Use longer timeout for deep research to allow model thinking time
+            const timeoutDuration = finalSearchMode === 'deep' ? DEEP_RESEARCH_TIMEOUT_MS : TOOL_REQUEST_TIMEOUT_MS;
             const timeoutId = window.setTimeout(() => {
                 if (controller.signal.aborted) return;
                 timeoutTriggered = true;
                 controller.abort();
-            }, TOOL_REQUEST_TIMEOUT_MS);
+            }, timeoutDuration);
             abortTimeoutIds.set(controller, timeoutId);
             return controller;
         };
@@ -1886,6 +2025,32 @@ export function ChatPage() {
                         });
                         const mergedSources = Array.from(mergedSourceMap.values());
                         const mergedContent = `${round1.content}\n\n${round2.content}`;
+
+                        // Capture sources for export
+                        setCurrentDeepResearchSources(mergedSources);
+
+                        // Add findings to display
+                        const newFindings: ResearchFinding[] = [
+                            {
+                                id: '1',
+                                phase: 'Round 1',
+                                title: 'Landscape Scan',
+                                content: round1.content.slice(0, 150) + '...',
+                                sourceCount: round1.sources.length,
+                                confidence: 'high',
+                                timestamp: Date.now()
+                            },
+                            {
+                                id: '2',
+                                phase: 'Round 2',
+                                title: 'Verification Pass',
+                                content: round2.content.slice(0, 150) + '...',
+                                sourceCount: round2.sources.length,
+                                confidence: 'high',
+                                timestamp: Date.now() + 1000
+                            }
+                        ];
+                        setResearchFindings(newFindings);
 
                         upsertDeepResearchTask({
                             id: synthTaskId,
@@ -2691,6 +2856,22 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
             ) : (
                 <WelcomeScreen onSend={handleSend} />
             )}
+
+            <ThinkingIndicator 
+                isThinking={isThinkingVisible && deepResearchDrawer.isVisible && deepResearchDrawer.tasks.some(t => t.status === 'running')}
+                label="Model is analyzing research findings..."
+            />
+
+            <ResearchFindingsPanel 
+                findings={researchFindings}
+                isVisible={researchFindings.length > 0}
+            />
+
+            <ModelThinkingPanel 
+                thinkingContent={modelThinkingSteps}
+                isVisible={isThinkingVisible && modelThinkingSteps.length > 0}
+                currentStepId={deepResearchDrawer.currentStep}
+            />
             
             <ChatInput
                 onSend={handleSend}
@@ -2711,6 +2892,18 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                 title="Deep Research"
                 currentStep={deepResearchDrawer.currentStep}
                 onClose={resetDeepResearchDrawer}
+                onExport={handleExportResearchTrace}
+            />
+
+            <DeepResearchQuestionsModal
+                isOpen={deepResearchQuestionsOpen}
+                onClose={() => {
+                    setDeepResearchQuestionsOpen(false);
+                    setPendingDeepResearchTopic('');
+                }}
+                onSubmit={handleDeepResearchQuestionsSubmit}
+                questions={deepResearchQuestions}
+                isLoading={isGeneratingQuestions}
             />
 
             {isAutoLoading && (
