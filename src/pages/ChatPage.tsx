@@ -10,6 +10,7 @@ import { DeepResearchQuestionsModal } from '../components/chat/DeepResearchQuest
 import { ResearchFindingsPanel } from '../components/chat/ResearchFindingsPanel';
 import { ModelThinkingPanel } from '../components/chat/ModelThinkingPanel';
 import { ThinkingIndicator } from '../components/chat/ThinkingIndicator';
+import { DeepResearchStreamingPanel } from '../components/chat/DeepResearchStreamingPanel';
 import { useAIConfig } from '../context/AIConfigContext';
 import { useAuth } from '../context/AuthContext';
 import { ImageModal } from '../components/shared/ImageModal';
@@ -591,6 +592,13 @@ export function ChatPage() {
     const [modelThinkingSteps, setModelThinkingSteps] = useState<Array<{ stepId: string; content: string; isStreaming: boolean }>>([]);
     const [currentDeepResearchTopic, setCurrentDeepResearchTopic] = useState<string>('');
     const [currentDeepResearchSources, setCurrentDeepResearchSources] = useState<WebSearchSource[]>([]);
+    const [deepResearchStreamingStep, setDeepResearchStreamingStep] = useState<{
+        id: string;
+        label: string;
+        thinking?: string;
+        response?: string;
+        isStreaming: boolean;
+    } | null>(null);
     const activeGenerationRef = useRef<ActiveGeneration | null>(null);
 
     const updateAiMessage = (sessionId: string, msgId: string, updates: Partial<Message>) => {
@@ -627,6 +635,7 @@ export function ChatPage() {
 
     const resetDeepResearchDrawer = () => {
         setDeepResearchDrawer({ isVisible: false, currentStep: '', tasks: [] });
+        setDeepResearchStreamingStep(null);
     };
 
     const upsertDeepResearchTask = (task: ToolCall) => {
@@ -1663,6 +1672,11 @@ export function ChatPage() {
                     updateAiMessage(targetSid, aiMsgId, { reasoningExpanded: true });
 
                     while (true) {
+                        // Check if user stopped generation
+                        if (generation.stopped) {
+                            throw new Error('Generation stopped by user');
+                        }
+
                         const { done, value } = await reader.read();
                         if (done) break;
 
@@ -1797,6 +1811,11 @@ export function ChatPage() {
                     let collectedSources: WebSearchSource[] = [];
 
                     while (true) {
+                        // Check if user stopped generation
+                        if (generation.stopped) {
+                            throw new Error('Generation stopped by user');
+                        }
+
                         const { done, value } = await searchReader.read();
                         if (done) break;
 
@@ -1957,6 +1976,15 @@ export function ChatPage() {
                         setDeepResearchStep(roundLabel);
                         setStreamingStatus(`Waiting for tool call response (${roundLabel})...`);
 
+                        // Initialize streaming step
+                        setDeepResearchStreamingStep({
+                            id: taskId,
+                            label: roundLabel,
+                            thinking: undefined,
+                            response: '',
+                            isStreaming: true
+                        });
+
                         const response = await fetch(`${perplexicaBase}/api/search`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -1985,6 +2013,11 @@ export function ChatPage() {
                         let collectedSources: WebSearchSource[] = [];
 
                         while (true) {
+                            // Check if user stopped generation
+                            if (generation.stopped) {
+                                throw new Error('Generation stopped by user');
+                            }
+
                             const { done, value } = await reader.read();
                             if (done) break;
 
@@ -2027,6 +2060,12 @@ export function ChatPage() {
                                         });
                                     } else if (event.type === 'response' && typeof event.data === 'string') {
                                         fullContent += event.data;
+                                        // Update streaming step with accumulated response
+                                        setDeepResearchStreamingStep(prev => prev && {
+                                            ...prev,
+                                            response: fullContent,
+                                            isStreaming: true
+                                        });
                                     }
                                 } catch {
                                     // Ignore malformed stream line.
@@ -2048,11 +2087,28 @@ export function ChatPage() {
                             completedAt: new Date().toISOString()
                         });
 
+                        // Mark streaming step as finished
+                        setDeepResearchStreamingStep(prev => prev && {
+                            ...prev,
+                            response: cleanedContent,
+                            isStreaming: false
+                        });
+
                         return { content: cleanedContent, sources: collectedSources };
                     };
 
                     try {
                         setStreamingStatus('Planning multi-step deep research...');
+                        
+                        // Show planning phase in streaming panel
+                        setDeepResearchStreamingStep({
+                            id: planTaskId,
+                            label: 'Planning deep research strategy...',
+                            thinking: undefined,
+                            response: 'Analyzing topic and generating search queries...',
+                            isStreaming: true
+                        });
+
                         const planningPrompt = `You are planning a deep research workflow.\nUser topic: ${effectiveContent}\nGenerate strict JSON with two complementary search queries:\n{"queries":["...","..."]}\nRules:\n- Query 1 broad landscape.\n- Query 2 verification/fact-check angle.\n- Keep each query concise and source-oriented.`;
                         let plannedQueries = [effectiveContent, `${effectiveContent} verify with official sources`];
 
@@ -2093,6 +2149,13 @@ export function ChatPage() {
                             progress: 100,
                             completedAt: new Date().toISOString()
                         });
+
+                        // Mark planning phase as done
+                        setDeepResearchStreamingStep(prev => prev && prev.id === planTaskId ? {
+                            ...prev,
+                            response: `Queries planned:\n1. ${plannedQueries[0]}\n2. ${plannedQueries[1]}`,
+                            isStreaming: false
+                        } : prev);
 
                         const round1 = await runDeepSearchRound(plannedQueries[0] || effectiveContent, round1TaskId, 'Research round 1: landscape scan');
                         const round2 = await runDeepSearchRound(plannedQueries[1] || `${effectiveContent} verification`, round2TaskId, 'Research round 2: verification pass');
@@ -2141,8 +2204,24 @@ export function ChatPage() {
                         setDeepResearchStep('Using collected evidence to generate final answer...');
                         setStreamingStatus('Using tool call response to generate final answer...');
 
+                        // Show synthesis phase in streaming panel
+                        setDeepResearchStreamingStep({
+                            id: synthTaskId,
+                            label: 'Synthesizing final answer...',
+                            thinking: 'Analyzing evidence from both rounds',
+                            response: 'Generating comprehensive answer...',
+                            isStreaming: true
+                        });
+
                         const synthesized = await synthesizeFromToolResult(mergedContent, mergedSources, chatMatch.key);
                         const finalAnswer = synthesized || mergedContent;
+
+                        // Mark synthesis as complete
+                        setDeepResearchStreamingStep(prev => prev && prev.id === synthTaskId ? {
+                            ...prev,
+                            response: finalAnswer,
+                            isStreaming: false
+                        } : prev);
 
                         upsertDeepResearchTask({
                             id: synthTaskId,
@@ -2186,6 +2265,12 @@ export function ChatPage() {
                             completedAt: new Date().toISOString()
                         });
                         setDeepResearchStep('Deep research failed');
+                        // Update streaming step to show error
+                        setDeepResearchStreamingStep(prev => prev ? {
+                            ...prev,
+                            response: `Error: ${deepResearchError instanceof Error ? deepResearchError.message : 'Unknown error'}`,
+                            isStreaming: false
+                        } : null);
                         throw deepResearchError;
                     }
                 }
@@ -2547,6 +2632,11 @@ IMPORTANT: Do not overthink. Provide direct, concise answers. Avoid excessive el
             updateAiMessage(targetSid, aiMsgId, { reasoningExpanded: true });
 
             while (true) {
+                // Check if user stopped generation
+                if (generation.stopped) {
+                    throw new Error('Generation stopped by user');
+                }
+
                 const { done, value } = await reader.read();
                 if (done) break;
 
@@ -2755,6 +2845,11 @@ IMPORTANT: Do not overthink. Provide direct, concise answers. Avoid excessive el
                             let fEvent = '';
                             let fBuffer = '';
                             while (true) {
+                                // Check if user stopped generation
+                                if (generation.stopped) {
+                                    throw new Error('Generation stopped by user');
+                                }
+
                                 const { done, value } = await fReader.read();
                                 if (done) break;
                                 fBuffer += decoder.decode(value, { stream: true });
@@ -2985,6 +3080,11 @@ IMPORTANT: Do not overthink. Provide direct, concise answers. Avoid excessive el
                 currentStep={deepResearchDrawer.currentStep}
                 onClose={resetDeepResearchDrawer}
                 onExport={handleExportResearchTrace}
+            />
+
+            <DeepResearchStreamingPanel
+                currentStep={deepResearchStreamingStep}
+                isVisible={deepResearchDrawer.isVisible && !!deepResearchStreamingStep}
             />
 
             <DeepResearchQuestionsModal
