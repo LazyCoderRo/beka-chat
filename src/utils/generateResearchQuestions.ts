@@ -97,8 +97,15 @@ Example format:
             return getDefaultQuestions(topic);
         }
 
+        // Remove markdown code fence wrappers if present
+        let cleaned = raw;
+        const codeBlockMatch = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (codeBlockMatch) {
+            cleaned = codeBlockMatch[1];
+        }
+
         // Extract JSON array from response
-        const jsonMatch = raw.match(/\[[\s\S]*\]/);
+        const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
         if (!jsonMatch) {
             return getDefaultQuestions(topic);
         }

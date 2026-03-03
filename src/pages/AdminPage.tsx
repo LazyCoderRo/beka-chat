@@ -66,11 +66,21 @@ export function AdminPage() {
             const response = await fetch('/api/admin/users', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+            
+            // Handle 404 - endpoint not implemented
+            if (response.status === 404) {
+                console.warn('User management endpoint not available');
+                setUsers([]);
+                setIsLoadingUsers(false);
+                return;
+            }
+            
             const data = await response.json() as { users?: AdminUser[]; error?: string };
             if (!response.ok) throw new Error(data.error || 'Failed to fetch users');
             setUsers(data.users || []);
         } catch (error) {
             console.error('Error fetching users:', error);
+            setUsers([]);
         } finally {
             setIsLoadingUsers(false);
         }
@@ -156,6 +166,11 @@ export function AdminPage() {
                 },
                 body: JSON.stringify({ role })
             });
+            if (response.status === 404) {
+                console.warn('User management endpoint not available');
+                setUserActionId(null);
+                return;
+            }
             const data = await response.json() as { user?: AdminUser; error?: string };
             if (!response.ok) throw new Error(data.error || 'Failed to update role');
             setUsers(prev => prev.map(u => (u.id === targetUser.id ? { ...u, role } : u)));
@@ -176,6 +191,11 @@ export function AdminPage() {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+            if (response.status === 404) {
+                console.warn('User management endpoint not available');
+                setUserActionId(null);
+                return;
+            }
             const data = await response.json() as { success?: boolean; error?: string };
             if (!response.ok) throw new Error(data.error || 'Failed to delete user');
             setUsers(prev => prev.filter(u => u.id !== targetUser.id));
@@ -196,6 +216,12 @@ export function AdminPage() {
             const response = await fetch(`/api/admin/users/${targetUserId}/sessions`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+            if (response.status === 404) {
+                console.warn('User sessions endpoint not available');
+                setUserSessions([]);
+                setIsLoadingUserSessions(false);
+                return;
+            }
             const data = await response.json() as { sessions?: AdminSessionSummary[]; error?: string };
             if (!response.ok) throw new Error(data.error || 'Failed to fetch user sessions');
             setUserSessions(data.sessions || []);
@@ -215,6 +241,12 @@ export function AdminPage() {
             const response = await fetch(`/api/admin/users/${targetUserId}/sessions/${targetSessionId}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+            if (response.status === 404) {
+                console.warn('Session detail endpoint not available');
+                setSelectedSession(null);
+                setIsLoadingSessionDetail(false);
+                return;
+            }
             const data = await response.json() as { session?: ChatSession; error?: string };
             if (!response.ok) throw new Error(data.error || 'Failed to fetch session detail');
             setSelectedSession(data.session || null);
