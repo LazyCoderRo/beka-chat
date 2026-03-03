@@ -4,11 +4,30 @@ import { useAIConfig } from '../context/AIConfigContext';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/shared/Button';
 import { LoadModelModal } from '../components/shared/LoadModelModal';
-import { Cpu, Image, Database, Save, CheckCircle2, Zap, Layers, Eye, Download, Trash2, Clock, Sparkles, Settings, AlertCircle } from 'lucide-react';
+import { Cpu, Image, Database, Save, CheckCircle2, Zap, Layers, Eye, Download, Trash2, Clock, Sparkles, Settings, AlertCircle, Users, Shield, User as UserIcon, MessageSquare, RefreshCw } from 'lucide-react';
 import { CustomDropdown } from '../components/shared/CustomDropdown';
-import type { AIModel } from '../types';
+import { MarkdownRenderer } from '../components/chat/MarkdownRenderer';
+import type { AIModel, ChatSession, Message } from '../types';
 
-type AdminSection = 'models' | 'defaults' | 'general';
+type AdminSection = 'models' | 'defaults' | 'general' | 'users' | 'sessions';
+
+interface AdminUser {
+    id: number;
+    name: string;
+    email: string;
+    role: 'admin' | 'user';
+    avatarUrl?: string;
+    createdAt: string;
+    sessionCount?: number;
+}
+
+interface AdminSessionSummary {
+    id: string;
+    title: string;
+    preview?: string;
+    updatedAt: string;
+    messageCount: number;
+}
 
 export function AdminPage() {
     const { config, updateConfig, availableModels, fetchModels, loadModel, unloadModel } = useAIConfig();
@@ -24,11 +43,50 @@ export function AdminPage() {
     const [selectedModelToLoad, setSelectedModelToLoad] = useState<AIModel | null>(null);
     const [isLoadingAModel, setIsLoadingAModel] = useState(false);
     const [activeSection, setActiveSection] = useState<AdminSection>('models');
+    const [users, setUsers] = useState<AdminUser[]>([]);
+    const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+    const [userActionId, setUserActionId] = useState<number | null>(null);
+    const [selectedUserForSessions, setSelectedUserForSessions] = useState<string>('');
+    const [userSessions, setUserSessions] = useState<AdminSessionSummary[]>([]);
+    const [selectedSessionId, setSelectedSessionId] = useState<string>('');
+    const [selectedSession, setSelectedSession] = useState<ChatSession | null>(null);
+    const [isLoadingUserSessions, setIsLoadingUserSessions] = useState(false);
+    const [isLoadingSessionDetail, setIsLoadingSessionDetail] = useState(false);
 
     // Auto-refresh models when admin modal opens
     useEffect(() => {
         fetchModels();
     }, [fetchModels]);
+
+    const fetchUsers = async () => {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        setIsLoadingUsers(true);
+        try {
+            const response = await fetch('/api/admin/users', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json() as { users?: AdminUser[]; error?: string };
+            if (!response.ok) throw new Error(data.error || 'Failed to fetch users');
+            setUsers(data.users || []);
+        } catch (error) {
+            console.error('Error fetching users:', error);
+        } finally {
+            setIsLoadingUsers(false);
+        }
+    };
+
+    useEffect(() => {
+        if (user?.role === 'admin') {
+            void fetchUsers();
+        }
+    }, [user?.role]);
+
+    useEffect(() => {
+        if (activeSection === 'sessions' && users.length === 0 && user?.role === 'admin') {
+            void fetchUsers();
+        }
+    }, [activeSection, users.length, user?.role]);
 
     if (user?.role !== 'admin') {
         return (
@@ -85,6 +143,105 @@ export function AdminPage() {
         }
     };
 
+    const handleRoleChange = async (targetUser: AdminUser, role: 'admin' | 'user') => {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        setUserActionId(targetUser.id);
+        try {
+            const response = await fetch(`/api/admin/users/${targetUser.id}/role`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ role })
+            });
+            const data = await response.json() as { user?: AdminUser; error?: string };
+            if (!response.ok) throw new Error(data.error || 'Failed to update role');
+            setUsers(prev => prev.map(u => (u.id === targetUser.id ? { ...u, role } : u)));
+        } catch (error) {
+            console.error('Error updating user role:', error);
+        } finally {
+            setUserActionId(null);
+        }
+    };
+
+    const handleDeleteUser = async (targetUser: AdminUser) => {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        if (!window.confirm(`Delete user "${targetUser.name}" (${targetUser.email})?`)) return;
+        setUserActionId(targetUser.id);
+        try {
+            const response = await fetch(`/api/admin/users/${targetUser.id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json() as { success?: boolean; error?: string };
+            if (!response.ok) throw new Error(data.error || 'Failed to delete user');
+            setUsers(prev => prev.filter(u => u.id !== targetUser.id));
+        } catch (error) {
+            console.error('Error deleting user:', error);
+        } finally {
+            setUserActionId(null);
+        }
+    };
+
+    const fetchUserSessions = async (targetUserId: string) => {
+        const token = localStorage.getItem('token');
+        if (!token || !targetUserId) return;
+        setIsLoadingUserSessions(true);
+        setSelectedSession(null);
+        setSelectedSessionId('');
+        try {
+            const response = await fetch(`/api/admin/users/${targetUserId}/sessions`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json() as { sessions?: AdminSessionSummary[]; error?: string };
+            if (!response.ok) throw new Error(data.error || 'Failed to fetch user sessions');
+            setUserSessions(data.sessions || []);
+        } catch (error) {
+            console.error('Error fetching user sessions:', error);
+            setUserSessions([]);
+        } finally {
+            setIsLoadingUserSessions(false);
+        }
+    };
+
+    const fetchSessionDetail = async (targetUserId: string, targetSessionId: string) => {
+        const token = localStorage.getItem('token');
+        if (!token || !targetUserId || !targetSessionId) return;
+        setIsLoadingSessionDetail(true);
+        try {
+            const response = await fetch(`/api/admin/users/${targetUserId}/sessions/${targetSessionId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json() as { session?: ChatSession; error?: string };
+            if (!response.ok) throw new Error(data.error || 'Failed to fetch session detail');
+            setSelectedSession(data.session || null);
+        } catch (error) {
+            console.error('Error fetching session detail:', error);
+            setSelectedSession(null);
+        } finally {
+            setIsLoadingSessionDetail(false);
+        }
+    };
+
+    const handleSelectUserForSessions = (value: string) => {
+        setSelectedUserForSessions(value);
+        void fetchUserSessions(value);
+    };
+
+    const handleSelectSession = (value: string) => {
+        setSelectedSessionId(value);
+        if (!selectedUserForSessions) return;
+        void fetchSessionDetail(selectedUserForSessions, value);
+    };
+
+    const handleRefreshUserSessions = () => {
+        if (!selectedUserForSessions) return;
+        void fetchUserSessions(selectedUserForSessions);
+    };
+
     const renderRoleIcon = (role: string) => {
         switch (role) {
             case 'vision':
@@ -123,6 +280,20 @@ export function AdminPage() {
                 >
                     <Settings size={16} />
                     General
+                </button>
+                <button
+                    className={`bk-admin-nav-item ${activeSection === 'users' ? 'active' : ''}`}
+                    onClick={() => setActiveSection('users')}
+                >
+                    <Users size={16} />
+                    Users
+                </button>
+                <button
+                    className={`bk-admin-nav-item ${activeSection === 'sessions' ? 'active' : ''}`}
+                    onClick={() => setActiveSection('sessions')}
+                >
+                    <MessageSquare size={16} />
+                    Sessions
                 </button>
             </div>
 
@@ -354,6 +525,152 @@ export function AdminPage() {
                             </p>
                         </section>
                     </div>
+                )}
+
+                {/* USER MANAGEMENT SECTION */}
+                {activeSection === 'users' && (
+                    <section className="bk-admin-section" style={{ gridColumn: '1 / -1' }}>
+                        <h3 className="bk-admin-subsection-title">User Management</h3>
+
+                        {isLoadingUsers ? (
+                            <p style={{ color: 'var(--text-muted)' }}>Loading users...</p>
+                        ) : (
+                            <div className="bk-admin-users-list">
+                                {users.map(u => {
+                                    const isCurrentUser = user?.id === String(u.id);
+                                    const isBusy = userActionId === u.id;
+                                    return (
+                                        <div key={u.id} className="bk-admin-user-card">
+                                            <div className="bk-admin-user-info">
+                                                <div className="bk-admin-user-name-row">
+                                                    <span className="bk-admin-user-name">{u.name}</span>
+                                                    <span className={`bk-admin-user-role ${u.role === 'admin' ? 'bk-admin-user-role--admin' : ''}`}>
+                                                        {u.role === 'admin' ? <Shield size={12} /> : <UserIcon size={12} />}
+                                                        {u.role}
+                                                    </span>
+                                                </div>
+                                                <div className="bk-admin-user-email">{u.email}</div>
+                                                <div className="bk-admin-user-meta">Created: {new Date(u.createdAt).toLocaleString()}</div>
+                                            </div>
+                                            <div className="bk-admin-user-actions">
+                                                <Button
+                                                    variant="secondary"
+                                                    size="sm"
+                                                    disabled={isBusy || isCurrentUser}
+                                                    onClick={() => handleRoleChange(u, u.role === 'admin' ? 'user' : 'admin')}
+                                                >
+                                                    {u.role === 'admin' ? 'Set User' : 'Set Admin'}
+                                                </Button>
+                                                <Button
+                                                    variant="secondary"
+                                                    size="sm"
+                                                    disabled={isBusy || isCurrentUser}
+                                                    leftIcon={<Trash2 size={14} />}
+                                                    onClick={() => handleDeleteUser(u)}
+                                                >
+                                                    Delete
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </section>
+                )}
+
+                {/* SESSION AUDIT SECTION */}
+                {activeSection === 'sessions' && (
+                    <section className="bk-admin-section" style={{ gridColumn: '1 / -1' }}>
+                        <h3 className="bk-admin-subsection-title">Check User Sessions</h3>
+
+                        <div className="bk-admin-grid">
+                            <section className="bk-admin-section">
+                                <label className="bk-admin-label">
+                                    <Users size={16} />
+                                    Select User
+                                </label>
+                                <CustomDropdown
+                                    options={users.map(u => ({
+                                        id: String(u.id),
+                                        name: u.name,
+                                        meta: u.email,
+                                        subMeta: <span>{u.sessionCount || 0} sessions</span>
+                                    }))}
+                                    value={selectedUserForSessions}
+                                    onChange={handleSelectUserForSessions}
+                                    placeholder="Choose a user"
+                                    label="Users"
+                                />
+                            </section>
+
+                            <section className="bk-admin-section">
+                                <label className="bk-admin-label">
+                                    <MessageSquare size={16} />
+                                    Select Session
+                                </label>
+                                <CustomDropdown
+                                    options={userSessions.map(s => ({
+                                        id: s.id,
+                                        name: s.title || 'Untitled Chat',
+                                        meta: `${s.messageCount} messages`,
+                                        subMeta: <span>{new Date(s.updatedAt).toLocaleString()}</span>
+                                    }))}
+                                    value={selectedSessionId}
+                                    onChange={handleSelectSession}
+                                    placeholder={selectedUserForSessions ? 'Choose a chat session' : 'Select user first'}
+                                    label="User Sessions"
+                                />
+                            </section>
+                        </div>
+
+                        <div className="bk-admin-sessions-actions">
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={handleRefreshUserSessions}
+                                disabled={!selectedUserForSessions || isLoadingUserSessions}
+                                leftIcon={<RefreshCw size={14} />}
+                            >
+                                Refresh Sessions
+                            </Button>
+                        </div>
+
+                        {isLoadingUserSessions && (
+                            <p style={{ color: 'var(--text-muted)' }}>Loading sessions...</p>
+                        )}
+
+                        {isLoadingSessionDetail && (
+                            <p style={{ color: 'var(--text-muted)' }}>Loading conversation...</p>
+                        )}
+
+                        {!isLoadingSessionDetail && selectedSession && (
+                            <div className="bk-admin-session-viewer">
+                                <div className="bk-admin-session-viewer__header">
+                                    <div className="bk-admin-session-viewer__title">{selectedSession.title || 'Untitled Chat'}</div>
+                                    <div className="bk-admin-session-viewer__meta">
+                                        {selectedSession.messages?.length || 0} messages
+                                    </div>
+                                </div>
+
+                                <div className="bk-admin-session-messages">
+                                    {(selectedSession.messages || []).map((msg: Message) => (
+                                        <div key={msg.id} className={`bk-admin-session-message bk-admin-session-message--${msg.role}`}>
+                                            <div className="bk-admin-session-message__top">
+                                                <span className="bk-admin-session-message__role">{msg.role}</span>
+                                                <span className="bk-admin-session-message__time">
+                                                    {new Date(msg.createdAt).toLocaleString()}
+                                                </span>
+                                            </div>
+                                            <div className="bk-admin-session-message__body">
+                                                <MarkdownRenderer content={msg.content || ''} />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </section>
                 )}
 
             {/* Footer */}

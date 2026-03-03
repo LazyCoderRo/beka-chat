@@ -14,7 +14,7 @@ export function DeepSearchProgress({ steps, isComplete }: DeepSearchProgressProp
         <div className="bk-deep-search">
             <div className="bk-deep-search__header">
                 <Zap size={14} className="bk-deep-search__icon" />
-                <span className="bk-deep-search__title">Deep Search</span>
+                <span className="bk-deep-search__title">Deep Research</span>
                 <span className="bk-deep-search__progress">
                     {doneCount}/{steps.length}
                 </span>

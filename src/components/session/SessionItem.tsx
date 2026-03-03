@@ -117,7 +117,7 @@ export function SessionItem({ session }: SessionItemProps) {
                                 {mode === 'deep' && (
                                     <div className="bk-session-item__tag bk-session-item__tag--deep">
                                         <Zap size={11} />
-                                        <span>Deep</span>
+                                        <span>Deep Research</span>
                                     </div>
                                 )}
                             </div>

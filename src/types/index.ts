@@ -84,6 +84,7 @@ export interface Message {
   id: string;
   role: MessageRole;
   content: string;
+  statusText?: string;
   attachments?: FileAttachment[];
   toolCalls?: ToolCall[];
   webSearchResult?: WebSearchResult;

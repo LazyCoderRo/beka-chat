@@ -162,6 +162,18 @@
     color: var(--text-primary);
 }
 
+.bk-msg__status {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 220px;
+}
+
+.bk-msg__status-text {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
 .bk-msg__suggestions {
     margin-top: var(--space-3);
     display: flex;

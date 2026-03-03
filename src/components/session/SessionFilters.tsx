@@ -8,7 +8,7 @@ const FILTERS: { id: SessionFilter; label: string }[] = [
     { id: 'this-week', label: 'This week' },
     { id: 'with-attachments', label: 'Files' },
     { id: 'web-search', label: 'Web' },
-    { id: 'deep-search', label: 'Deep' },
+    { id: 'deep-search', label: 'Deep Research' },
 ];
 
 export function SessionFilters() {

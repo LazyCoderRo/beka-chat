@@ -4,12 +4,15 @@ import { useSession } from '../context/SessionContext';
 import { MessageList } from '../components/chat/MessageList';
 import { ChatInput } from '../components/chat/ChatInput';
 import { WelcomeScreen } from '../components/chat/WelcomeScreen';
+import { TaskDrawer } from '../components/chat/TaskDrawer';
 import { ContextNotification } from '../components/chat/ContextNotification';
 import { useAIConfig } from '../context/AIConfigContext';
+import { useAuth } from '../context/AuthContext';
 import { ImageModal } from '../components/shared/ImageModal';
 import { Spinner } from '../components/shared/Spinner';
 import { archiveMessagesWithSummary, calculateContextTokens, getContextMessagesForAPI } from '../utils/contextManager';
 import { getSmartRecommendations, recommendationsToActionSuggestions, generateNextPromptSuggestionsWithModel } from '../utils/smartRecommendations';
+import { copyToClipboardSafe } from '../utils/clipboard';
 import type { AIModel, FileAttachment, SearchMode, ChatSession, Message, ToolCall, WebSearchSource, MessageActionSuggestion } from '../types';
 
 interface PerplexicaModel {
@@ -45,12 +48,25 @@ interface ActiveGeneration {
     stopped: boolean;
 }
 
+interface DeepResearchDrawerState {
+    isVisible: boolean;
+    currentStep: string;
+    tasks: ToolCall[];
+}
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 120000;
+const TOOL_REQUEST_TIMEOUT_MS = 60000;
+
 interface SearchDecision {
     mode: 'none' | 'webpage' | 'web' | 'deep';
     shouldPrompt: boolean;
     promptText?: string;
     suggestions?: MessageActionSuggestion[];
+    inferred?: boolean;
+    inferredReason?: string;
 }
+
+type ModelToolDecision = 'none' | 'web_search' | 'deep_search' | 'webpage_fetch' | 'analyze_image';
 
 const URL_REGEX = /\b((?:https?:\/\/|www\.)[^\s/$.?#].[^\s]*)/gi;
 
@@ -102,14 +118,31 @@ function resolvePerplexicaBase(endpoint: string): string {
 }
 
 function normalizeUrl(url: string): string {
-    const normalized = url.trim();
-    if (/^https?:\/\//i.test(normalized)) return normalized;
-    return `https://${normalized}`;
+    let normalized = url.trim();
+    normalized = normalized
+        .replace(/^[<[(\s"'`]+/, '')
+        .replace(/[>\])\s"',.;:!?`]+$/, '');
+
+    if (!normalized) return normalized;
+    if (!/^https?:\/\//i.test(normalized)) {
+        normalized = `https://${normalized}`;
+    }
+    return normalized;
 }
 
 function extractUrls(text: string): string[] {
     const matches = text.match(URL_REGEX) ?? [];
-    const normalized = matches.map(normalizeUrl);
+    const normalized = matches
+        .map(normalizeUrl)
+        .filter(Boolean)
+        .filter(candidate => {
+            try {
+                const parsed = new URL(candidate);
+                return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+            } catch {
+                return false;
+            }
+        });
     return [...new Set(normalized)];
 }
 
@@ -167,6 +200,40 @@ function maybeBenefitsFromWebSearch(text: string): boolean {
     return /(events?|updates?|changelog|release notes|news|compare)/.test(lowered);
 }
 
+function explicitlyRequestsWebLookup(text: string): boolean {
+    const lowered = text.toLowerCase();
+    return /(search (the )?(web|internet)|look (it|this|that)? ?up online|check (the )?(web|internet)|find online|browse online)/.test(lowered);
+}
+
+function isFollowUpRecheckRequest(text: string): boolean {
+    const lowered = text.toLowerCase();
+    return /(check again|recheck|double[- ]check|verify again|are you sure|still true|check it again|confirm again)/.test(lowered);
+}
+
+function isRetryRequest(text: string): boolean {
+    const lowered = text.toLowerCase();
+    return /(try again|retry|once more|again please|can you try again|please try again)/.test(lowered);
+}
+
+function lastAssistantMessageUsedSearch(previousMessages: Message[]): boolean {
+    for (let i = previousMessages.length - 1; i >= 0; i--) {
+        const msg = previousMessages[i];
+        if (msg.role !== 'assistant') continue;
+        return Boolean(msg.webSearchResult || msg.searchMode === 'web' || msg.searchMode === 'deep');
+    }
+    return false;
+}
+
+function lastAssistantSaidNoWebTools(previousMessages: Message[]): boolean {
+    for (let i = previousMessages.length - 1; i >= 0; i--) {
+        const msg = previousMessages[i];
+        if (msg.role !== 'assistant') continue;
+        const text = (msg.content || '').toLowerCase();
+        return /don't have access|cannot check live|can't check live|only available tool.*image|don't have access to a tool/.test(text);
+    }
+    return false;
+}
+
 function decideSearchStrategy(
     content: string,
     previousMessages: Message[],
@@ -183,8 +250,26 @@ function decideSearchStrategy(
         return { mode: 'web', shouldPrompt: false };
     }
 
+    // If user clearly asks to search online, auto-trigger web/deep search.
+    if (explicitlyRequestsWebLookup(content)) {
+        if (requestedMode === 'deep') return { mode: 'deep', shouldPrompt: false };
+        return { mode: 'web', shouldPrompt: false, inferred: true, inferredReason: 'explicit web lookup request' };
+    }
+
+    // Follow-up "check again" after a search should keep using web tools.
+    if (isFollowUpRecheckRequest(content) && lastAssistantMessageUsedSearch(previousMessages)) {
+        if (requestedMode === 'deep') return { mode: 'deep', shouldPrompt: false };
+        return { mode: 'web', shouldPrompt: false, inferred: true, inferredReason: 'follow-up recheck after web search' };
+    }
+
+    // If assistant previously refused due "no internet/tools" and user asks retry, force search.
+    if (isRetryRequest(content) && lastAssistantSaidNoWebTools(previousMessages)) {
+        if (requestedMode === 'deep') return { mode: 'deep', shouldPrompt: false };
+        return { mode: 'web', shouldPrompt: false, inferred: true, inferredReason: 'retry after tool-access failure' };
+    }
+
     if (requestedMode !== 'none') {
-        return { mode: 'none', shouldPrompt: false };
+        return { mode: requestedMode, shouldPrompt: false };
     }
 
     if (maybeBenefitsFromWebSearch(content)) {
@@ -194,7 +279,7 @@ function decideSearchStrategy(
             promptText: 'I can continue directly or look this up online. Pick the next step:',
             suggestions: [
                 { id: `act-web-${Date.now()}`, label: 'Search Web', description: 'Quick online lookup for current data.', query: content, searchMode: 'web' },
-                { id: `act-deep-${Date.now()}`, label: 'Deep Search', description: 'Broader web research with richer context.', query: content, searchMode: 'deep' },
+                { id: `act-deep-${Date.now()}`, label: 'Deep Research', description: 'Multi-step research with verification and synthesis.', query: content, searchMode: 'deep' },
                 { id: `act-no-web-${Date.now()}`, label: 'No Web', description: 'Continue only from model knowledge/context.', query: content, searchMode: 'none' },
             ]
         };
@@ -206,11 +291,45 @@ function decideSearchStrategy(
 function toSourceFromPerplexica(source: PerplexicaSource): WebSearchSource | null {
     const url = source.metadata?.url;
     if (!url) return null;
+    try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    } catch {
+        return null;
+    }
+
     return {
         title: source.metadata?.title || url,
         url,
         content: source.content || ''
     };
+}
+
+const SOURCE_ERROR_PATTERN = /(error fetching|failed to fetch|fetch failed|invalid url|timed out|timeout|blocked|forbidden|dns|not found)/i;
+
+function sanitizeWebSources(sources: WebSearchSource[]): WebSearchSource[] {
+    const unique = new Map<string, WebSearchSource>();
+
+    for (const source of sources) {
+        const url = (source.url || '').trim();
+        if (!url) continue;
+        try {
+            const parsed = new URL(url);
+            if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
+        } catch {
+            continue;
+        }
+
+        const title = (source.title || url).trim();
+        const content = (source.content || '').trim();
+        if (SOURCE_ERROR_PATTERN.test(`${title} ${content}`)) continue;
+
+        if (!unique.has(url)) {
+            unique.set(url, { title, url, content });
+        }
+    }
+
+    return Array.from(unique.values());
 }
 
 function messageHistoryForPerplexica(previousMessages: Message[], userContent: string): Array<[string, string]> {
@@ -262,13 +381,148 @@ function sanitizeAssistantContent(text: string): string {
         .trim();
 }
 
+function createThrottledTextUpdater(
+    onUpdate: (value: string) => void,
+    intervalMs = 50
+) {
+    let lastUpdateAt = 0;
+    let pending: string | null = null;
+    let timer: number | null = null;
+
+    const flush = () => {
+        if (pending === null) return;
+        onUpdate(pending);
+        pending = null;
+        lastUpdateAt = Date.now();
+        if (timer !== null) {
+            window.clearTimeout(timer);
+            timer = null;
+        }
+    };
+
+    const schedule = (value: string, force = false) => {
+        pending = value;
+        const now = Date.now();
+
+        if (force || now - lastUpdateAt >= intervalMs) {
+            flush();
+            return;
+        }
+
+        if (timer === null) {
+            const wait = Math.max(0, intervalMs - (now - lastUpdateAt));
+            timer = window.setTimeout(() => {
+                timer = null;
+                flush();
+            }, wait);
+        }
+    };
+
+    const cancel = () => {
+        if (timer !== null) {
+            window.clearTimeout(timer);
+            timer = null;
+        }
+        pending = null;
+    };
+
+    return { schedule, flush, cancel };
+}
+
+function buildConversationContextForMainModel(previousMessages: Message[], maxTurns = 10): string {
+    const recent = previousMessages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .slice(-maxTurns);
+
+    if (recent.length === 0) return '';
+
+    const lines = recent.map(m => {
+        const role = m.role === 'user' ? 'User' : 'Assistant';
+        const content = (m.content || '').trim() || '[no text content]';
+        return `${role}: ${content}`;
+    });
+
+    return `Conversation history:\n${lines.join('\n\n')}\n\nCurrent user message:`;
+}
+
+async function inferToolDecisionFromMainModel(
+    modelId: string,
+    userContent: string,
+    previousMessages: Message[]
+): Promise<ModelToolDecision | null> {
+    const recent = previousMessages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .slice(-6)
+        .map(m => `${m.role.toUpperCase()}: ${m.content}`)
+        .join('\n');
+
+    const systemPrompt = `You are a routing controller.
+Choose whether the assistant should use a tool.
+Available tools:
+- web_search
+- deep_search
+- webpage_fetch
+- analyze_image
+- none
+
+Rules:
+- For real-time facts (time/weather/prices/news/current events), choose web_search or deep_search.
+- For requests asking for source links/citations/URLs, choose web_search.
+- For explicit URL/page analysis, choose webpage_fetch.
+- For image analysis requests with image context, choose analyze_image.
+- Otherwise choose none.
+
+Return ONLY strict JSON object:
+{"tool":"web_search"}
+or {"tool":"none"}`;
+
+    const input = `Conversation context:\n${recent || '[none]'}\n\nCurrent user message:\n${userContent}\n\nReturn JSON now.`;
+
+    const response = await fetch(`${LM_STUDIO_PROXY_BASE}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model: modelId,
+            input,
+            stream: false,
+            system_prompt: systemPrompt
+        })
+    });
+
+    if (!response.ok) return null;
+    const data = await response.json() as { output?: Array<{ content?: string }>; content?: string };
+    const raw = (data.output?.[0]?.content || data.content || '').trim();
+    if (!raw) return null;
+
+    const objectMatch = raw.match(/\{[\s\S]*\}/);
+    const candidate = (objectMatch ? objectMatch[0] : raw).trim();
+    try {
+        const parsed = JSON.parse(candidate) as { tool?: string };
+        const tool = (parsed.tool || '').toLowerCase();
+        if (tool === 'web_search' || tool === 'deep_search' || tool === 'webpage_fetch' || tool === 'analyze_image' || tool === 'none') {
+            return tool as ModelToolDecision;
+        }
+    } catch {
+        // Fallback to null
+    }
+    return null;
+}
+
 export function ChatPage() {
     const { activeSession, setSessions, activeSessionId, createNewSession } = useSession();
+    const { user } = useAuth();
     const { config, availableModels, loadModel } = useAIConfig();
     const [fullImage, setFullImage] = useState<string | null>(null);
     const [contextNotification, setContextNotification] = useState<{ message: string } | null>(null);
     const [promptSuggestions, setPromptSuggestions] = useState<MessageActionSuggestion[]>([]);
+    const [isSessionCopied, setIsSessionCopied] = useState(false);
+    const [autoSearchHint, setAutoSearchHint] = useState<{ mode: SearchMode; reason: string } | null>(null);
     const [isAutoLoading, setIsAutoLoading] = useState(false);
+    const [deepResearchDrawer, setDeepResearchDrawer] = useState<DeepResearchDrawerState>({
+        isVisible: false,
+        currentStep: '',
+        tasks: []
+    });
     const activeGenerationRef = useRef<ActiveGeneration | null>(null);
 
     const updateAiMessage = (sessionId: string, msgId: string, updates: Partial<Message>) => {
@@ -303,6 +557,30 @@ export function ChatPage() {
         }));
     };
 
+    const resetDeepResearchDrawer = () => {
+        setDeepResearchDrawer({ isVisible: false, currentStep: '', tasks: [] });
+    };
+
+    const upsertDeepResearchTask = (task: ToolCall) => {
+        setDeepResearchDrawer(prev => {
+            const existing = prev.tasks;
+            const idx = existing.findIndex(t => t.id === task.id);
+            const tasks = idx === -1
+                ? [...existing, task]
+                : existing.map((t, i) => i === idx ? { ...t, ...task } : t);
+
+            return {
+                ...prev,
+                isVisible: true,
+                tasks
+            };
+        });
+    };
+
+    const setDeepResearchStep = (currentStep: string) => {
+        setDeepResearchDrawer(prev => ({ ...prev, isVisible: true, currentStep }));
+    };
+
     const handleStopGeneration = () => {
         const active = activeGenerationRef.current;
         if (!active) return;
@@ -321,6 +599,7 @@ export function ChatPage() {
                     return {
                         ...m,
                         isStreaming: false,
+                        statusText: undefined,
                         toolCalls: m.toolCalls?.map(tc =>
                             tc.status === 'running' || tc.status === 'pending'
                                 ? { ...tc, status: 'error', label: 'Stopped by user' }
@@ -330,6 +609,20 @@ export function ChatPage() {
                 })
             };
         }));
+
+        setDeepResearchDrawer(prev => {
+            const hasActive = prev.tasks.some(t => t.status === 'running' || t.status === 'pending');
+            if (!hasActive) return prev;
+            return {
+                ...prev,
+                currentStep: 'Stopped by user',
+                tasks: prev.tasks.map(t =>
+                    (t.status === 'running' || t.status === 'pending')
+                        ? { ...t, status: 'error', label: `${t.label} (stopped)` }
+                        : t
+                )
+            };
+        });
     };
 
     const handleClearChat = () => {
@@ -345,6 +638,50 @@ export function ChatPage() {
                 updatedAt: new Date().toISOString()
             };
         }));
+    };
+
+    const handleCopySessionMarkdown = async () => {
+        if (!activeSession || activeSession.messages.length === 0) return;
+
+        const displayName = user?.name?.trim() || 'User';
+        const lines: string[] = [];
+        lines.push(`# ${activeSession.title || 'Chat Session'}`);
+        lines.push('');
+        lines.push(`- Session ID: \`${activeSession.id}\``);
+        lines.push(`- Exported: ${new Date().toISOString()}`);
+        lines.push('');
+
+        activeSession.messages.forEach((msg) => {
+            const roleLabel =
+                msg.role === 'user' ? `User (${displayName})` :
+                    msg.role === 'assistant' ? 'Assistant' :
+                        'System';
+
+            lines.push(`## ${roleLabel} · ${new Date(msg.createdAt).toISOString()}`);
+            lines.push('');
+            lines.push(msg.content?.trim().length ? msg.content : '_[no text content]_');
+
+            if (msg.attachments && msg.attachments.length > 0) {
+                lines.push('');
+                lines.push('Attachments:');
+                msg.attachments.forEach((att) => {
+                    lines.push(`- ${att.name} (${att.type}, ${att.mimeType}, ${att.size} bytes)`);
+                });
+            }
+
+            lines.push('');
+        });
+
+        const markdown = lines.join('\n');
+
+        try {
+            const copied = await copyToClipboardSafe(markdown);
+            if (!copied) throw new Error('Clipboard copy is not supported in this context.');
+            setIsSessionCopied(true);
+            setTimeout(() => setIsSessionCopied(false), 1500);
+        } catch (error) {
+            console.error('Failed to copy session markdown:', error);
+        }
     };
 
     /**
@@ -571,19 +908,125 @@ export function ChatPage() {
         const previousMessages = forcedBaseMessages ?? activeSession?.messages ?? [];
         const includeUserMessage = !options?.skipUserMessage;
         const effectiveContent = withReferencedLinkContext(content, previousMessages);
-        const strategy = decideSearchStrategy(effectiveContent, previousMessages, searchMode);
-        const finalSearchMode: SearchMode = options?.forceSearchMode
+        let strategy = decideSearchStrategy(effectiveContent, previousMessages, searchMode);
+        const provisionalSearchMode: SearchMode = options?.forceSearchMode
             || (strategy.mode === 'web' || strategy.mode === 'deep' ? strategy.mode : 'none');
 
-        // Create user message
+        const userMsgId = Date.now().toString();
         const userMsg: Message = {
-            id: Date.now().toString(),
+            id: userMsgId,
             role: 'user',
             content,
             attachments,
-            searchMode: finalSearchMode,
+            searchMode: provisionalSearchMode,
             createdAt: new Date().toISOString(),
         };
+
+        // Optimistically show user input immediately so UI doesn't wait on async routing/model prep.
+        if (includeUserMessage) {
+            setSessions((prev: ChatSession[]) => {
+                const existing = prev.find(s => s.id === targetSid);
+                const fallbackBaseMessages = forcedBaseMessages ?? [];
+                const baseSession: ChatSession = existing ?? {
+                    id: targetSid,
+                    title: 'New Chat',
+                    preview: '',
+                    messages: fallbackBaseMessages,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                    hasAttachments: false,
+                    searchMode: 'none',
+                    usedSearchModes: [],
+                };
+
+                const baseMessages = forcedBaseMessages ?? baseSession.messages;
+                const withoutUserMsg = baseMessages.filter(m => m.id !== userMsgId);
+                const usedSearchModes = baseSession.usedSearchModes ? [...baseSession.usedSearchModes] : [];
+                if (provisionalSearchMode !== 'none' && !usedSearchModes.includes(provisionalSearchMode)) {
+                    usedSearchModes.push(provisionalSearchMode);
+                }
+                const messages = [...withoutUserMsg, userMsg];
+                const nextSession: ChatSession = {
+                    ...baseSession,
+                    messages,
+                    searchMode: provisionalSearchMode !== 'none' ? provisionalSearchMode : baseSession.searchMode,
+                    usedSearchModes,
+                    hasAttachments: messages.some(m => (m.attachments?.length || 0) > 0),
+                    updatedAt: new Date().toISOString(),
+                    preview: content.slice(0, 60) || (attachments.length > 0 ? 'Image uploaded' : ''),
+                    title: withoutUserMsg.length === 0 ? content.slice(0, 30) + (content.length > 30 ? '...' : '') : baseSession.title
+                };
+
+                if (existing) {
+                    return prev.map(s => s.id === targetSid ? nextSession : s);
+                }
+                return [nextSession, ...prev];
+            });
+        }
+
+        // Model-driven routing first, heuristic strategy as fallback.
+        // This keeps tool usage aligned with the main chat model's intent understanding.
+        if (!options?.forceSearchMode && searchMode === 'none') {
+            try {
+                const toolDecision = await inferToolDecisionFromMainModel(
+                    resolvedChatModelId || 'default',
+                    effectiveContent,
+                    previousMessages
+                );
+                if (toolDecision === 'web_search') {
+                    strategy = { mode: 'web', shouldPrompt: false, inferred: true, inferredReason: 'main model tool routing' };
+                } else if (toolDecision === 'deep_search') {
+                    strategy = { mode: 'deep', shouldPrompt: false, inferred: true, inferredReason: 'main model tool routing' };
+                } else if (toolDecision === 'webpage_fetch') {
+                    strategy = { mode: 'webpage', shouldPrompt: false, inferred: true, inferredReason: 'main model tool routing' };
+                }
+            } catch {
+                // Keep heuristic strategy when tool routing model call fails.
+            }
+        }
+
+        const finalSearchMode: SearchMode = options?.forceSearchMode
+            || (strategy.mode === 'web' || strategy.mode === 'deep' ? strategy.mode : 'none');
+
+        if (finalSearchMode !== 'deep') {
+            resetDeepResearchDrawer();
+        } else {
+            setDeepResearchDrawer(prev => ({
+                isVisible: true,
+                currentStep: prev.currentStep || 'Initializing deep research...',
+                tasks: prev.tasks
+            }));
+        }
+
+        if (includeUserMessage && finalSearchMode !== provisionalSearchMode) {
+            setSessions((prev: ChatSession[]) => prev.map(s => {
+                if (s.id !== targetSid) return s;
+                const usedSearchModes = s.usedSearchModes ? [...s.usedSearchModes] : [];
+                if (finalSearchMode !== 'none' && !usedSearchModes.includes(finalSearchMode)) {
+                    usedSearchModes.push(finalSearchMode);
+                }
+                return {
+                    ...s,
+                    searchMode: finalSearchMode !== 'none' ? finalSearchMode : s.searchMode,
+                    usedSearchModes,
+                    messages: s.messages.map(m => m.id === userMsgId ? { ...m, searchMode: finalSearchMode } : m),
+                    updatedAt: new Date().toISOString(),
+                };
+            }));
+        }
+
+        if (
+            !options?.forceSearchMode &&
+            searchMode === 'none' &&
+            finalSearchMode !== 'none' &&
+            strategy.inferred
+        ) {
+            setAutoSearchHint({
+                mode: finalSearchMode,
+                reason: strategy.inferredReason || 'intent detected'
+            });
+            setTimeout(() => setAutoSearchHint(null), 3500);
+        }
 
         // Calculate what messages will be after adding user message
         const futureMessages = includeUserMessage ? [...previousMessages, userMsg] : previousMessages;
@@ -625,7 +1068,8 @@ export function ChatPage() {
                 };
 
                 const baseMessages = forcedBaseMessages ?? baseSession.messages;
-                const messages = [...baseMessages, userMsg, recommendationMsg];
+                const withoutUserMsg = baseMessages.filter(m => m.id !== userMsgId);
+                const messages = [...withoutUserMsg, userMsg, recommendationMsg];
                 const last = messages[messages.length - 1];
                 const nextSession: ChatSession = {
                     ...baseSession,
@@ -633,7 +1077,7 @@ export function ChatPage() {
                     hasAttachments: messages.some(m => (m.attachments?.length || 0) > 0),
                     updatedAt: new Date().toISOString(),
                     preview: last?.content?.slice(0, 60) || '',
-                    title: baseMessages.length === 0 ? content.slice(0, 30) + (content.length > 30 ? '...' : '') : baseSession.title
+                    title: withoutUserMsg.length === 0 ? content.slice(0, 30) + (content.length > 30 ? '...' : '') : baseSession.title
                 };
 
                 if (existing) {
@@ -649,6 +1093,7 @@ export function ChatPage() {
             id: aiMsgId,
             role: 'assistant',
             content: '',
+            statusText: 'Processing user prompt...',
             isStreaming: true,
             createdAt: new Date().toISOString(),
         };
@@ -677,12 +1122,13 @@ export function ChatPage() {
             };
 
             const baseMessages = forcedBaseMessages ?? baseSession.messages;
+            const withoutUserMsg = baseMessages.filter(m => m.id !== userMsgId);
             const usedSearchModes = baseSession.usedSearchModes ? [...baseSession.usedSearchModes] : [];
             if (finalSearchMode !== 'none' && !usedSearchModes.includes(finalSearchMode)) {
                 usedSearchModes.push(finalSearchMode);
             }
             const appended = includeUserMessage ? [userMsg, aiMsg] : [aiMsg];
-            const messages = [...baseMessages, ...appended];
+            const messages = [...withoutUserMsg, ...appended];
             const nextSession: ChatSession = {
                 ...baseSession,
                 messages,
@@ -691,7 +1137,7 @@ export function ChatPage() {
                 hasAttachments: messages.some(m => (m.attachments?.length || 0) > 0),
                 updatedAt: new Date().toISOString(),
                 preview: content.slice(0, 60) || (attachments.length > 0 ? 'Image uploaded' : ''),
-                title: baseMessages.length === 0 ? content.slice(0, 30) + (content.length > 30 ? '...' : '') : baseSession.title
+                title: withoutUserMsg.length === 0 ? content.slice(0, 30) + (content.length > 30 ? '...' : '') : baseSession.title
             };
 
             if (existing) {
@@ -701,10 +1147,39 @@ export function ChatPage() {
         });
 
         const chatUrl = `${LM_STUDIO_PROXY_BASE}/chat`;
+        let timeoutTriggered = false;
+        const abortTimeoutIds = new Map<AbortController, number>();
         const createAbortController = () => {
             const controller = new AbortController();
             generation.controllers.add(controller);
+            const timeoutId = window.setTimeout(() => {
+                if (controller.signal.aborted) return;
+                timeoutTriggered = true;
+                controller.abort();
+            }, DEFAULT_REQUEST_TIMEOUT_MS);
+            abortTimeoutIds.set(controller, timeoutId);
             return controller;
+        };
+        const createToolAbortController = () => {
+            const controller = new AbortController();
+            generation.controllers.add(controller);
+            const timeoutId = window.setTimeout(() => {
+                if (controller.signal.aborted) return;
+                timeoutTriggered = true;
+                controller.abort();
+            }, TOOL_REQUEST_TIMEOUT_MS);
+            abortTimeoutIds.set(controller, timeoutId);
+            return controller;
+        };
+        const clearAbortTimeouts = () => {
+            abortTimeoutIds.forEach(timeoutId => window.clearTimeout(timeoutId));
+            abortTimeoutIds.clear();
+        };
+        const throttledContentUpdate = createThrottledTextUpdater((nextContent: string) => {
+            updateAiMessage(targetSid, aiMsgId, { content: nextContent, statusText: undefined });
+        }, 50);
+        const setStreamingStatus = (statusText: string) => {
+            updateAiMessage(targetSid, aiMsgId, { statusText });
         };
         const isAbortedError = (error: unknown) =>
             (error instanceof DOMException && error.name === 'AbortError') ||
@@ -743,6 +1218,7 @@ export function ChatPage() {
 
             updateAiMessage(targetSid, aiMsgId, {
                 isStreaming: false,
+                statusText: undefined,
                 responseTime: totalDur,
                 modelName: availableModels.find(m => m.id === resolvedChatModelId)?.name || resolvedChatModelId,
                 actionSuggestions: actionSuggestions.length > 0 ? actionSuggestions : undefined,
@@ -774,7 +1250,96 @@ export function ChatPage() {
             if (activeGenerationRef.current === generation) {
                 activeGenerationRef.current = null;
             }
+            clearAbortTimeouts();
             generation.controllers.clear();
+        };
+
+        const synthesizeFromToolResult = async (
+            toolSummary: string,
+            toolSources: WebSearchSource[],
+            toolModelName: string
+        ): Promise<string> => {
+            const sourcesText = toolSources.length > 0
+                ? toolSources
+                    .slice(0, 8)
+                    .map((src, i) => `${i + 1}. ${src.title}\nURL: ${src.url}\nSnippet: ${src.content || '[no snippet]'}`)
+                    .join('\n\n')
+                : 'No valid sources were returned.';
+
+            const synthesisPrompt = [
+                `User request: ${effectiveContent}`,
+                '',
+                'Tool output summary:',
+                toolSummary || '[empty]',
+                '',
+                'Tool sources:',
+                sourcesText,
+                '',
+                'Instructions:',
+                '- Use the tool output and sources to answer the user.',
+                '- Do not invent links or facts not present in the sources above.',
+                '- If sources are insufficient, say what is missing and ask a concise clarification.',
+                '- Keep answer concise and practical.',
+            ].join('\n');
+
+            const synthesisBody: {
+                model: string;
+                input: string;
+                stream: boolean;
+                system_prompt: string;
+                reasoning?: 'low' | 'medium' | 'high';
+            } = {
+                model: resolvedChatModelId || 'default',
+                input: synthesisPrompt,
+                stream: false,
+                system_prompt: `You are a precise assistant. External tool (${toolModelName}) provided evidence. Produce the final user-facing answer grounded only in that evidence.`,
+                reasoning: config.reasoningLevel && config.reasoningLevel !== 'off' ? config.reasoningLevel : undefined,
+            };
+
+            if (synthesisBody.reasoning && localStorage.getItem(`no-reasoning-${synthesisBody.model}`)) {
+                delete synthesisBody.reasoning;
+            }
+
+            let synthesisRes = await fetch(chatUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                signal: createAbortController().signal,
+                body: JSON.stringify(synthesisBody)
+            });
+
+            if (!synthesisRes.ok) {
+                let errData: { error?: { param?: string; message?: string } } | null = null;
+                try { errData = await synthesisRes.json(); } catch { /* ignore */ }
+                if (synthesisRes.status === 400 && synthesisBody.reasoning && (errData?.error?.param === 'reasoning' || errData?.error?.message?.includes('reasoning'))) {
+                    localStorage.setItem(`no-reasoning-${synthesisBody.model}`, 'true');
+                    delete synthesisBody.reasoning;
+                    synthesisRes = await fetch(chatUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        signal: createAbortController().signal,
+                        body: JSON.stringify(synthesisBody)
+                    });
+                }
+            }
+
+            if (!synthesisRes.ok) {
+                let errText = '';
+                try { errText = JSON.stringify(await synthesisRes.json()); } catch { /* ignore */ }
+                throw new Error(`Final synthesis failed (HTTP ${synthesisRes.status})${errText ? `: ${errText}` : ''}`);
+            }
+
+            const payload = await synthesisRes.json() as {
+                output?: Array<{ content?: string }>;
+                content?: string;
+                choices?: Array<{ message?: { content?: string } }>;
+            };
+
+            return sanitizeAssistantContent(
+                payload.output?.[0]?.content ||
+                payload.content ||
+                payload.choices?.[0]?.message?.content ||
+                ''
+            ).trim();
         };
 
         try {
@@ -797,9 +1362,10 @@ export function ChatPage() {
                         startedAt: new Date().toISOString()
                     }]
                 });
+                setStreamingStatus('Calling tool: fetching webpage...');
 
                 try {
-                    const page = await fetchWebpage(firstUrl, createAbortController().signal);
+                    const page = await fetchWebpage(firstUrl, createToolAbortController().signal);
 
                     updateAiMessage(targetSid, aiMsgId, {
                         toolCalls: [{
@@ -815,6 +1381,7 @@ export function ChatPage() {
                             sources: [{ title: page.title, url: page.url, content: page.content.slice(0, 280) }]
                         }
                     });
+                    setStreamingStatus('Generating final response...');
 
                     const prompt = [
                         `User request: ${effectiveContent}`,
@@ -915,7 +1482,7 @@ export function ChatPage() {
 
                                 if (eventType === 'message.delta' && data.content) {
                                     fullContent += data.content;
-                                    updateAiMessage(targetSid, aiMsgId, { content: sanitizeAssistantContent(fullContent) });
+                                    throttledContentUpdate.schedule(sanitizeAssistantContent(fullContent));
                                 } else if (eventType === 'reasoning.delta' && data.content) {
                                     if (!reasoningStartTime) reasoningStartTime = Date.now();
                                     reasoning += data.content;
@@ -936,7 +1503,7 @@ export function ChatPage() {
                                 const fallback = data.choices?.[0]?.delta?.content;
                                 if (!eventType && fallback) {
                                     fullContent += fallback;
-                                    updateAiMessage(targetSid, aiMsgId, { content: sanitizeAssistantContent(fullContent) });
+                                    throttledContentUpdate.schedule(sanitizeAssistantContent(fullContent));
                                 }
                             } catch {
                                 // Ignore malformed stream line.
@@ -944,9 +1511,11 @@ export function ChatPage() {
                         }
                     }
 
+                    throttledContentUpdate.flush();
                     finalize();
                 } catch {
                     const perplexicaBase = resolvePerplexicaBase(config.perplexicaEndpoint);
+                    setStreamingStatus('Direct fetch blocked. Switching to Beka Search...');
                     updateAiMessage(targetSid, aiMsgId, {
                         toolCalls: [{
                             id: toolId,
@@ -958,15 +1527,15 @@ export function ChatPage() {
                         }]
                     });
 
-                    const providersRes = await fetch(`${perplexicaBase}/api/providers`, { signal: createAbortController().signal });
+                    const providersRes = await fetch(`${perplexicaBase}/api/providers`, { signal: createToolAbortController().signal });
                     if (!providersRes.ok) throw new Error(`Beka Search Engine providers failed (HTTP ${providersRes.status})`);
                     const providersData = await providersRes.json() as { providers?: PerplexicaProvider[] };
                     const providers = providersData.providers ?? [];
 
                     const chatMatch = (() => {
                         for (const provider of providers) {
-                            const firstModel = provider.chatModels?.[0];
-                            if (firstModel) return { providerId: provider.id, key: firstModel.key };
+                            const model = provider.chatModels?.find(m => m.key === resolvedToolModelId);
+                            if (model) return { providerId: provider.id, key: model.key };
                         }
                         return null;
                     })();
@@ -980,13 +1549,16 @@ export function ChatPage() {
                     })();
 
                     if (!chatMatch || !embeddingMatch) {
-                        throw new Error('Unable to fetch webpage content and no Beka Search Engine models are available.');
+                        if (!chatMatch) {
+                            throw new Error(`Beka Search Engine is missing configured tool model: ${resolvedToolModelId}`);
+                        }
+                        throw new Error('Beka Search Engine is missing embedding provider models.');
                     }
 
                     const searchResponse = await fetch(`${perplexicaBase}/api/search`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        signal: createAbortController().signal,
+                        signal: createToolAbortController().signal,
                         body: JSON.stringify({
                             chatModel: chatMatch,
                             embeddingModel: embeddingMatch,
@@ -1027,24 +1599,34 @@ export function ChatPage() {
                                 };
 
                                 if (event.type === 'sources' && Array.isArray(event.data)) {
-                                    collectedSources = event.data
-                                        .map(toSourceFromPerplexica)
-                                        .filter((src): src is WebSearchSource => src !== null);
-                                    updateAiMessage(targetSid, aiMsgId, {
-                                        webSearchResult: {
-                                            query: content,
-                                            sources: collectedSources
-                                        }
-                                    });
+                                    collectedSources = sanitizeWebSources(
+                                        event.data
+                                            .map(toSourceFromPerplexica)
+                                            .filter((src): src is WebSearchSource => src !== null)
+                                    );
+                                    if (collectedSources.length > 0) {
+                                        updateAiMessage(targetSid, aiMsgId, {
+                                            webSearchResult: {
+                                                query: content,
+                                                sources: collectedSources
+                                            }
+                                        });
+                                    }
                                 } else if (event.type === 'response' && typeof event.data === 'string') {
                                     fullContent += event.data;
-                                    updateAiMessage(targetSid, aiMsgId, { content: sanitizeAssistantContent(fullContent) });
                                 }
                             } catch {
                                 // Ignore malformed stream line.
                             }
                         }
                     }
+
+                    const cleanedContent = sanitizeAssistantContent(fullContent);
+                    if (!cleanedContent || collectedSources.length === 0 || SOURCE_ERROR_PATTERN.test(cleanedContent)) {
+                        throw new Error('Beka Search Engine webpage fallback returned invalid sources/response.');
+                    }
+
+                    setStreamingStatus('Using tool call response to generate final answer...');
 
                     updateAiMessage(targetSid, aiMsgId, {
                         toolCalls: [{
@@ -1057,9 +1639,13 @@ export function ChatPage() {
                         }]
                     });
 
+                    const synthesized = await synthesizeFromToolResult(cleanedContent, collectedSources, chatMatch.key);
+                    const finalAnswer = synthesized || cleanedContent;
+                    throttledContentUpdate.schedule(finalAnswer, true);
+                    throttledContentUpdate.flush();
                     finalize({
-                        modelName: `Beka Search Engine (${chatMatch.key})`,
-                        content: sanitizeAssistantContent(fullContent) || 'No response received from Beka Search Engine.',
+                        modelName: availableModels.find(m => m.id === resolvedChatModelId)?.name || resolvedChatModelId,
+                        content: finalAnswer,
                     });
                 }
                 return;
@@ -1070,7 +1656,7 @@ export function ChatPage() {
                 const perplexicaBase = resolvePerplexicaBase(config.perplexicaEndpoint);
                 const toolId = `tc-perplexica-${Date.now()}`;
                 const toolType: ToolCall['type'] = finalSearchMode === 'deep' ? 'deep_search' : 'web_search';
-                const toolLabel = finalSearchMode === 'deep' ? 'Beka is doing a deep search on the internet... please wait...' : 'Beka is searching the web... please wait...';
+                const toolLabel = finalSearchMode === 'deep' ? 'Beka is performing deep research on the internet... please wait...' : 'Beka is searching the web... please wait...';
                 const toolStart = Date.now();
 
                 updateAiMessage(targetSid, aiMsgId, {
@@ -1083,8 +1669,9 @@ export function ChatPage() {
                         startedAt: new Date().toISOString(),
                     }]
                 });
+                setStreamingStatus('Calling tool: Beka Search...');
 
-                const providersRes = await fetch(`${perplexicaBase}/api/providers`, { signal: createAbortController().signal });
+                const providersRes = await fetch(`${perplexicaBase}/api/providers`, { signal: createToolAbortController().signal });
                 if (!providersRes.ok) {
                     throw new Error(`Beka Search Engine providers failed (HTTP ${providersRes.status})`);
                 }
@@ -1097,13 +1684,8 @@ export function ChatPage() {
 
                 const chatMatch = (() => {
                     for (const provider of providers) {
-                        const model = provider.chatModels?.find(m => m.key === resolvedChatModelId);
+                        const model = provider.chatModels?.find(m => m.key === resolvedToolModelId);
                         if (model) return { providerId: provider.id, key: model.key };
-                    }
-
-                    for (const provider of providers) {
-                        const firstModel = provider.chatModels?.[0];
-                        if (firstModel) return { providerId: provider.id, key: firstModel.key };
                     }
                     return null;
                 })();
@@ -1122,90 +1704,388 @@ export function ChatPage() {
                 })();
 
                 if (!chatMatch || !embeddingMatch) {
-                    throw new Error('Beka Search Engine is missing chat/embedding provider models.');
+                    if (!chatMatch) {
+                        throw new Error(`Beka Search Engine is missing configured tool model: ${resolvedToolModelId}`);
+                    }
+                    throw new Error('Beka Search Engine is missing embedding provider models.');
                 }
 
                 const history = messageHistoryForPerplexica(previousMessages, effectiveContent);
-                const sources = finalSearchMode === 'deep' ? ['web', 'academic', 'discussions'] : ['web'];
-                const optimizationMode = finalSearchMode === 'deep' ? 'quality' : 'speed';
+                if (finalSearchMode === 'deep') {
+                    const planTaskId = `dr-plan-${Date.now()}`;
+                    const round1TaskId = `dr-round1-${Date.now()}`;
+                    const round2TaskId = `dr-round2-${Date.now()}`;
+                    const synthTaskId = `dr-synth-${Date.now()}`;
 
-                const response = await fetch(`${perplexicaBase}/api/search`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    signal: createAbortController().signal,
-                    body: JSON.stringify({
-                        chatModel: chatMatch,
-                        embeddingModel: embeddingMatch,
-                        optimizationMode,
-                        sources,
-                        query: effectiveContent,
-                        history,
-                        stream: true,
-                    })
-                });
+                    setDeepResearchDrawer({
+                        isVisible: true,
+                        currentStep: 'Planning deep research...',
+                        tasks: [
+                            { id: planTaskId, type: 'deep_search', status: 'running', label: 'Plan research strategy', progress: 10, startedAt: new Date().toISOString() },
+                            { id: round1TaskId, type: 'deep_search', status: 'pending', label: 'Research round 1: landscape scan', progress: 0 },
+                            { id: round2TaskId, type: 'deep_search', status: 'pending', label: 'Research round 2: verification pass', progress: 0 },
+                            { id: synthTaskId, type: 'deep_search', status: 'pending', label: 'Synthesize final answer', progress: 0 },
+                        ]
+                    });
 
-                if (!response.ok) {
-                    throw new Error(`Beka Search Engine search failed (HTTP ${response.status})`);
-                }
+                    const runDeepSearchRound = async (query: string, taskId: string, roundLabel: string): Promise<{ content: string; sources: WebSearchSource[] }> => {
+                        upsertDeepResearchTask({
+                            id: taskId,
+                            type: 'deep_search',
+                            status: 'running',
+                            label: roundLabel,
+                            progress: 20,
+                            startedAt: new Date().toISOString()
+                        });
+                        setDeepResearchStep(roundLabel);
+                        setStreamingStatus(`Waiting for tool call response (${roundLabel})...`);
 
-                const reader = response.body?.getReader();
-                if (!reader) throw new Error('No Beka Search Engine stream reader.');
+                        const response = await fetch(`${perplexicaBase}/api/search`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            signal: createToolAbortController().signal,
+                            body: JSON.stringify({
+                                chatModel: chatMatch,
+                                embeddingModel: embeddingMatch,
+                                optimizationMode: 'quality',
+                                sources: ['web', 'academic', 'discussions'],
+                                query,
+                                history,
+                                stream: true,
+                            })
+                        });
 
-                const decoder = new TextDecoder();
-                let buffer = '';
-                let fullContent = '';
-                let collectedSources: WebSearchSource[] = [];
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() || '';
-
-                    for (const line of lines) {
-                        const trimmed = line.trim();
-                        if (!trimmed) continue;
-
-                        const normalized = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : trimmed;
-                        if (!normalized || normalized === '[DONE]') continue;
-
-                        try {
-                            const event = JSON.parse(normalized) as {
-                                type?: 'init' | 'sources' | 'response' | 'done';
-                                data?: string | PerplexicaSource[];
-                            };
-
-                            if (event.type === 'sources' && Array.isArray(event.data)) {
-                                upsertToolCall(targetSid, aiMsgId, {
-                                    id: toolId,
-                                    type: toolType,
-                                    status: 'running',
-                                    label: toolLabel,
-                                    progress: 60
-                                });
-                                collectedSources = event.data
-                                    .map(toSourceFromPerplexica)
-                                    .filter((src): src is WebSearchSource => src !== null);
-
-                                updateAiMessage(targetSid, aiMsgId, {
-                                    webSearchResult: {
-                                        query: content,
-                                        sources: collectedSources,
-                                    }
-                                });
-                            } else if (event.type === 'response' && typeof event.data === 'string') {
-                                fullContent += event.data;
-                                updateAiMessage(targetSid, aiMsgId, { content: sanitizeAssistantContent(fullContent) });
-                            }
-                        } catch {
-                            // Ignore malformed stream line.
+                        if (!response.ok) {
+                            throw new Error(`Beka Search Engine deep search failed (HTTP ${response.status})`);
                         }
+
+                        const reader = response.body?.getReader();
+                        if (!reader) throw new Error('No Beka Search Engine stream reader.');
+
+                        const decoder = new TextDecoder();
+                        let buffer = '';
+                        let fullContent = '';
+                        let collectedSources: WebSearchSource[] = [];
+
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+
+                            buffer += decoder.decode(value, { stream: true });
+                            const lines = buffer.split('\n');
+                            buffer = lines.pop() || '';
+
+                            for (const line of lines) {
+                                const trimmed = line.trim();
+                                if (!trimmed) continue;
+                                const normalized = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : trimmed;
+                                if (!normalized || normalized === '[DONE]') continue;
+
+                                try {
+                                    const event = JSON.parse(normalized) as {
+                                        type?: 'init' | 'sources' | 'response' | 'done';
+                                        data?: string | PerplexicaSource[];
+                                    };
+
+                                    if (event.type === 'sources' && Array.isArray(event.data)) {
+                                        collectedSources = sanitizeWebSources(
+                                            event.data
+                                                .map(toSourceFromPerplexica)
+                                                .filter((src): src is WebSearchSource => src !== null)
+                                        );
+                                        if (collectedSources.length > 0) {
+                                            updateAiMessage(targetSid, aiMsgId, {
+                                                webSearchResult: {
+                                                    query: content,
+                                                    sources: collectedSources,
+                                                }
+                                            });
+                                        }
+                                        upsertDeepResearchTask({
+                                            id: taskId,
+                                            type: 'deep_search',
+                                            status: 'running',
+                                            label: roundLabel,
+                                            progress: 65
+                                        });
+                                    } else if (event.type === 'response' && typeof event.data === 'string') {
+                                        fullContent += event.data;
+                                    }
+                                } catch {
+                                    // Ignore malformed stream line.
+                                }
+                            }
+                        }
+
+                        const cleanedContent = sanitizeAssistantContent(fullContent);
+                        if (!cleanedContent || collectedSources.length === 0 || SOURCE_ERROR_PATTERN.test(cleanedContent)) {
+                            throw new Error(`${roundLabel} returned invalid/insufficient evidence.`);
+                        }
+
+                        upsertDeepResearchTask({
+                            id: taskId,
+                            type: 'deep_search',
+                            status: 'done',
+                            label: roundLabel,
+                            progress: 100,
+                            completedAt: new Date().toISOString()
+                        });
+
+                        return { content: cleanedContent, sources: collectedSources };
+                    };
+
+                    try {
+                        setStreamingStatus('Planning multi-step deep research...');
+                        const planningPrompt = `You are planning a deep research workflow.\nUser topic: ${effectiveContent}\nGenerate strict JSON with two complementary search queries:\n{"queries":["...","..."]}\nRules:\n- Query 1 broad landscape.\n- Query 2 verification/fact-check angle.\n- Keep each query concise and source-oriented.`;
+                        let plannedQueries = [effectiveContent, `${effectiveContent} verify with official sources`];
+
+                        const planningRes = await fetch(chatUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            signal: createAbortController().signal,
+                            body: JSON.stringify({
+                                model: resolvedChatModelId || 'default',
+                                input: planningPrompt,
+                                stream: false
+                            })
+                        });
+
+                        if (planningRes.ok) {
+                            const planningData = await planningRes.json() as { output?: Array<{ content?: string }>; content?: string };
+                            const raw = (planningData.output?.[0]?.content || planningData.content || '').trim();
+                            const objMatch = raw.match(/\{[\s\S]*\}/);
+                            const parsedRaw = objMatch ? objMatch[0] : raw;
+                            try {
+                                const parsed = JSON.parse(parsedRaw) as { queries?: string[] };
+                                if (Array.isArray(parsed.queries) && parsed.queries.length > 0) {
+                                    plannedQueries = parsed.queries.slice(0, 2).map(q => q.trim()).filter(Boolean);
+                                    if (plannedQueries.length === 1) {
+                                        plannedQueries.push(`${plannedQueries[0]} verify with official sources`);
+                                    }
+                                }
+                            } catch {
+                                // Keep fallback queries.
+                            }
+                        }
+
+                        upsertDeepResearchTask({
+                            id: planTaskId,
+                            type: 'deep_search',
+                            status: 'done',
+                            label: 'Plan research strategy',
+                            progress: 100,
+                            completedAt: new Date().toISOString()
+                        });
+
+                        const round1 = await runDeepSearchRound(plannedQueries[0] || effectiveContent, round1TaskId, 'Research round 1: landscape scan');
+                        const round2 = await runDeepSearchRound(plannedQueries[1] || `${effectiveContent} verification`, round2TaskId, 'Research round 2: verification pass');
+
+                        const mergedSourceMap = new Map<string, WebSearchSource>();
+                        [...round1.sources, ...round2.sources].forEach(src => {
+                            if (!mergedSourceMap.has(src.url)) mergedSourceMap.set(src.url, src);
+                        });
+                        const mergedSources = Array.from(mergedSourceMap.values());
+                        const mergedContent = `${round1.content}\n\n${round2.content}`;
+
+                        upsertDeepResearchTask({
+                            id: synthTaskId,
+                            type: 'deep_search',
+                            status: 'running',
+                            label: 'Synthesize final answer',
+                            progress: 60,
+                            startedAt: new Date().toISOString()
+                        });
+                        setDeepResearchStep('Using collected evidence to generate final answer...');
+                        setStreamingStatus('Using tool call response to generate final answer...');
+
+                        const synthesized = await synthesizeFromToolResult(mergedContent, mergedSources, chatMatch.key);
+                        const finalAnswer = synthesized || mergedContent;
+
+                        upsertDeepResearchTask({
+                            id: synthTaskId,
+                            type: 'deep_search',
+                            status: 'done',
+                            label: 'Synthesize final answer',
+                            progress: 100,
+                            completedAt: new Date().toISOString()
+                        });
+                        setDeepResearchStep('Deep research complete');
+
+                        updateAiMessage(targetSid, aiMsgId, {
+                            webSearchResult: {
+                                query: content,
+                                sources: mergedSources,
+                            },
+                            toolCalls: [{
+                                id: toolId,
+                                type: toolType,
+                                status: 'done',
+                                label: 'Deep research complete',
+                                progress: 100,
+                                duration: Date.now() - toolStart,
+                            }]
+                        });
+
+                        throttledContentUpdate.schedule(finalAnswer, true);
+                        throttledContentUpdate.flush();
+                        finalize({
+                            modelName: availableModels.find(m => m.id === resolvedChatModelId)?.name || resolvedChatModelId,
+                            content: finalAnswer,
+                        });
+                        return;
+                    } catch (deepResearchError) {
+                        upsertDeepResearchTask({
+                            id: synthTaskId,
+                            type: 'deep_search',
+                            status: 'error',
+                            label: `Deep research failed: ${deepResearchError instanceof Error ? deepResearchError.message : 'Unknown error'}`,
+                            progress: 100,
+                            completedAt: new Date().toISOString()
+                        });
+                        setDeepResearchStep('Deep research failed');
+                        throw deepResearchError;
                     }
                 }
 
+                const attemptPlans: Array<{ mode: SearchMode; query: string; label: string }> = (() => {
+                    const constrainedQuery = `${effectiveContent}\n\nReturn only verified, directly usable source URLs. Exclude any URL/source that failed to fetch.`;
+                    return [
+                        { mode: 'web', query: effectiveContent, label: 'web' },
+                        { mode: 'deep', query: effectiveContent, label: 'deep fallback' },
+                        { mode: 'deep', query: constrainedQuery, label: 'deep constrained retry' },
+                    ];
+                })();
+
+                let finalContent = '';
+                let finalSources: WebSearchSource[] = [];
+                let lastFailureReason = 'No valid response received from Beka Search Engine.';
+
+                for (let attemptIndex = 0; attemptIndex < attemptPlans.length; attemptIndex++) {
+                    const attempt = attemptPlans[attemptIndex]!;
+                    const attemptNo = attemptIndex + 1;
+                    const isDeepAttempt = attempt.mode === 'deep';
+                    const attemptSources = isDeepAttempt ? ['web', 'academic', 'discussions'] : ['web'];
+                    const attemptOptimizationMode = isDeepAttempt ? 'quality' : 'speed';
+
+                    upsertToolCall(targetSid, aiMsgId, {
+                        id: toolId,
+                        type: toolType,
+                        status: 'running',
+                        label: `${toolLabel} (attempt ${attemptNo}/${attemptPlans.length}: ${attempt.label})`,
+                        progress: Math.min(20 + attemptIndex * 20, 75)
+                    });
+                    setStreamingStatus(`Waiting for tool call response (attempt ${attemptNo}/${attemptPlans.length})...`);
+
+                    const response = await fetch(`${perplexicaBase}/api/search`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        signal: createToolAbortController().signal,
+                        body: JSON.stringify({
+                            chatModel: chatMatch,
+                            embeddingModel: embeddingMatch,
+                            optimizationMode: attemptOptimizationMode,
+                            sources: attemptSources,
+                            query: attempt.query,
+                            history,
+                            stream: true,
+                        })
+                    });
+
+                    if (!response.ok) {
+                        lastFailureReason = `Beka Search Engine search failed (HTTP ${response.status})`;
+                        continue;
+                    }
+
+                    const reader = response.body?.getReader();
+                    if (!reader) {
+                        lastFailureReason = 'No Beka Search Engine stream reader.';
+                        continue;
+                    }
+
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    let fullContent = '';
+                    let collectedSources: WebSearchSource[] = [];
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() || '';
+
+                        for (const line of lines) {
+                            const trimmed = line.trim();
+                            if (!trimmed) continue;
+
+                            const normalized = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : trimmed;
+                            if (!normalized || normalized === '[DONE]') continue;
+
+                            try {
+                                const event = JSON.parse(normalized) as {
+                                    type?: 'init' | 'sources' | 'response' | 'done';
+                                    data?: string | PerplexicaSource[];
+                                };
+
+                                if (event.type === 'sources' && Array.isArray(event.data)) {
+                                    upsertToolCall(targetSid, aiMsgId, {
+                                        id: toolId,
+                                        type: toolType,
+                                        status: 'running',
+                                        label: `${toolLabel} (attempt ${attemptNo}/${attemptPlans.length})`,
+                                        progress: 60
+                                    });
+                                    collectedSources = sanitizeWebSources(
+                                        event.data
+                                            .map(toSourceFromPerplexica)
+                                            .filter((src): src is WebSearchSource => src !== null)
+                                    );
+
+                                    if (collectedSources.length > 0) {
+                                        updateAiMessage(targetSid, aiMsgId, {
+                                            webSearchResult: {
+                                                query: content,
+                                                sources: collectedSources,
+                                            }
+                                        });
+                                    }
+                            } else if (event.type === 'response' && typeof event.data === 'string') {
+                                fullContent += event.data;
+                            }
+                        } catch {
+                            // Ignore malformed stream line.
+                            }
+                        }
+                    }
+
+                    const cleanedContent = sanitizeAssistantContent(fullContent);
+                    const contentLooksInvalid = !cleanedContent || SOURCE_ERROR_PATTERN.test(cleanedContent);
+                    const hasValidSources = collectedSources.length > 0;
+                    const isValidAttempt = !contentLooksInvalid && hasValidSources;
+
+                    if (isValidAttempt) {
+                        finalContent = cleanedContent;
+                        finalSources = collectedSources;
+                        break;
+                    }
+
+                    lastFailureReason = contentLooksInvalid
+                        ? 'Search response was invalid or contained fetch errors.'
+                        : 'Search response had no valid sources.';
+                }
+
+                if (!finalContent || finalSources.length === 0) {
+                    throw new Error(`Beka Search Engine retries exhausted: ${lastFailureReason}`);
+                }
+
+                setStreamingStatus('Using tool call response to generate final answer...');
+
                 updateAiMessage(targetSid, aiMsgId, {
+                    webSearchResult: {
+                        query: content,
+                        sources: finalSources,
+                    },
                     toolCalls: [{
                         id: toolId,
                         type: toolType,
@@ -1216,9 +2096,13 @@ export function ChatPage() {
                     }]
                 });
 
+                const synthesized = await synthesizeFromToolResult(finalContent, finalSources, chatMatch.key);
+                const finalAnswer = synthesized || finalContent;
+                throttledContentUpdate.schedule(finalAnswer, true);
+                throttledContentUpdate.flush();
                 finalize({
-                    modelName: `Beka Search Engine (${chatMatch.key})`,
-                    content: sanitizeAssistantContent(fullContent) || 'No response received from Beka Search Engine.',
+                    modelName: availableModels.find(m => m.id === resolvedChatModelId)?.name || resolvedChatModelId,
+                    content: finalAnswer,
                 });
                 return;
             }
@@ -1283,6 +2167,15 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                 }
             }
 
+            // If LM response chaining is unavailable (e.g., previous turn came from external tool),
+            // prepend recent conversation so the main model still has context continuity.
+            if (!previous_response_id) {
+                const contextPrefix = buildConversationContextForMainModel(previousMessages);
+                if (contextPrefix) {
+                    inputContent = `${contextPrefix}\n${inputContent}`;
+                }
+            }
+
             const body: {
                 model: string;
                 input: string | Array<{ type: 'text' | 'image'; content?: string; data_url?: string }>;
@@ -1297,6 +2190,7 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                 system_prompt: toolSystemInst,
                 reasoning: config.reasoningLevel && config.reasoningLevel !== 'off' ? config.reasoningLevel : undefined,
             };
+            setStreamingStatus('Generating response...');
 
             if (previous_response_id) body.previous_response_id = previous_response_id;
             
@@ -1434,6 +2328,7 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                             const toolType: ToolCall['type'] = toolName === 'analyze_image' ? 'vision_analysis' : 'web_search';
 
                             if (eventType === 'tool_call.start') {
+                                setStreamingStatus('Calling tool...');
                                 upsertToolCall(targetSid, aiMsgId, {
                                     id: toolId,
                                     type: toolType,
@@ -1443,6 +2338,7 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                                     startedAt: new Date().toISOString()
                                 });
                             } else if (eventType === 'tool_call.arguments') {
+                                setStreamingStatus('Waiting for tool call response...');
                                 upsertToolCall(targetSid, aiMsgId, {
                                     id: toolId,
                                     type: toolType,
@@ -1451,6 +2347,7 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                                     progress: 60
                                 });
                             } else if (eventType === 'tool_call.success') {
+                                setStreamingStatus('Using tool call response to generate final answer...');
                                 upsertToolCall(targetSid, aiMsgId, {
                                     id: toolId,
                                     type: toolType,
@@ -1459,6 +2356,7 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                                     progress: 100
                                 });
                             } else if (eventType === 'tool_call.failure') {
+                                setStreamingStatus('Tool call failed. Preparing error response...');
                                 upsertToolCall(targetSid, aiMsgId, {
                                     id: toolId,
                                     type: toolType,
@@ -1470,7 +2368,7 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
 
                             if (eventType === 'message.delta') {
                                 fullContent += data.content || '';
-                                updateAiMessage(targetSid, aiMsgId, { content: cleanContent(fullContent) });
+                                throttledContentUpdate.schedule(cleanContent(fullContent));
 
                                 if (!toolCall && (fullContent.includes('TOOL_CALL: analyze_image') || fullContent.includes('analyze_image'))) {
                                     const tc: ToolCall = {
@@ -1520,7 +2418,7 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
 
                             if (!eventType && data.choices?.[0]?.delta?.content) {
                                 fullContent += data.choices[0].delta.content;
-                                updateAiMessage(targetSid, aiMsgId, { content: cleanContent(fullContent) });
+                                throttledContentUpdate.schedule(cleanContent(fullContent));
                             }
                         } catch {
                             // Ignore malformed stream line.
@@ -1616,7 +2514,7 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                                             const cont = fEvent === 'message.delta' ? d.content : d.choices?.[0]?.delta?.content;
                                             if (cont) {
                                                 fContent += cont;
-                                                updateAiMessage(targetSid, aiMsgId, { content: sanitizeAssistantContent(fContent) });
+                                                throttledContentUpdate.schedule(sanitizeAssistantContent(fContent));
                                             }
                                         } catch {
                                             // Ignore malformed stream line.
@@ -1629,22 +2527,80 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                 }
             }
 
+            throttledContentUpdate.flush();
             finalize();
         } catch (error) {
-            if (generation.stopped || isAbortedError(error)) {
+            throttledContentUpdate.cancel();
+            if (generation.stopped) {
                 if (activeGenerationRef.current === generation) {
                     activeGenerationRef.current = null;
                 }
+                clearAbortTimeouts();
                 generation.controllers.clear();
                 return;
             }
-            updateAiMessage(targetSid, aiMsgId, {
-                content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}.`,
-                isStreaming: false,
+            const isAbort = isAbortedError(error);
+            const errorMessage = isAbort
+                ? (timeoutTriggered ? 'Operation timed out and was canceled' : 'Operation was canceled')
+                : (error instanceof Error ? error.message : 'Unknown error');
+
+            setSessions((prev: ChatSession[]) => prev.map(s => {
+                if (s.id !== targetSid) return s;
+                return {
+                    ...s,
+                    messages: s.messages.map(m => {
+                        if (m.id !== aiMsgId) return m;
+
+                        const nextToolCalls = m.toolCalls?.map(tc => (
+                            tc.status === 'running' || tc.status === 'pending'
+                                ? {
+                                    ...tc,
+                                    status: 'error' as const,
+                                    progress: 100,
+                                    label: tc.label.includes('failed') ? tc.label : `${tc.label} failed`,
+                                    completedAt: new Date().toISOString(),
+                                    duration: tc.startedAt
+                                        ? Math.max(0, Date.now() - new Date(tc.startedAt).getTime())
+                                        : tc.duration
+                                }
+                                : tc
+                        ));
+
+                        return {
+                            ...m,
+                            content: `Error: ${errorMessage}.`,
+                            isStreaming: false,
+                            statusText: undefined,
+                            toolCalls: nextToolCalls
+                        };
+                    })
+                };
+            }));
+
+            setDeepResearchDrawer(prev => {
+                const hasActive = prev.tasks.some(t => t.status === 'running' || t.status === 'pending');
+                if (!hasActive) return prev;
+                return {
+                    ...prev,
+                    currentStep: `Failed: ${errorMessage}`,
+                    tasks: prev.tasks.map(t =>
+                        (t.status === 'running' || t.status === 'pending')
+                            ? {
+                                ...t,
+                                status: 'error',
+                                progress: 100,
+                                label: t.label.includes('failed') ? t.label : `${t.label} failed`,
+                                completedAt: new Date().toISOString()
+                            }
+                            : t
+                    )
+                };
             });
+
             if (activeGenerationRef.current === generation) {
                 activeGenerationRef.current = null;
             }
+            clearAbortTimeouts();
             generation.controllers.clear();
         }
     };
@@ -1740,10 +2696,21 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                 onSend={handleSend}
                 onStop={handleStopGeneration}
                 onClear={handleClearChat}
+                onCopySessionMarkdown={handleCopySessionMarkdown}
                 isGenerating={isGenerating}
                 messages={activeSession?.messages || []}
                 promptSuggestions={promptSuggestions}
+                autoSearchHint={autoSearchHint}
+                isSessionCopied={isSessionCopied}
                 onSelectSuggestion={(suggestion: MessageActionSuggestion) => handleSelectSuggestion('', suggestion)}
+            />
+
+            <TaskDrawer
+                tasks={deepResearchDrawer.tasks}
+                isVisible={deepResearchDrawer.isVisible}
+                title="Deep Research"
+                currentStep={deepResearchDrawer.currentStep}
+                onClose={resetDeepResearchDrawer}
             />
 
             {isAutoLoading && (

@@ -7,6 +7,7 @@ import { Copy, Check } from 'lucide-react';
 import { useState, useContext, useEffect } from 'react';
 import { ThemeContext } from '../../context/ThemeContext';
 import yaml from 'js-yaml';
+import { copyToClipboardSafe } from '../../utils/clipboard';
 import './MarkdownRenderer.css';
 
 interface CodeBlockProps {
@@ -20,7 +21,8 @@ function CodeBlock({ language, value }: CodeBlockProps) {
     const [copied, setCopied] = useState(false);
 
     const handleCopy = async () => {
-        await navigator.clipboard.writeText(value);
+        const copiedOk = await copyToClipboardSafe(value);
+        if (!copiedOk) return;
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };

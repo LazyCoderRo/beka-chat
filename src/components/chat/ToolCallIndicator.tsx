@@ -16,7 +16,7 @@ const LABELS = {
     vision_analysis: 'Analyzing image',
     document_analysis: 'Analyzing document',
     web_search: 'Searching web',
-    deep_search: 'Deep search',
+    deep_search: 'Deep research',
     webpage_fetch: 'Fetching webpage',
     context_summarization: 'Optimizing context',
 };

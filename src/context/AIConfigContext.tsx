@@ -51,10 +51,83 @@ const DEFAULT_CONFIG: AIConfig = {
 };
 
 const LM_STUDIO_PROXY_BASE = '/api/lmstudio';
+let lmStudioProxyMissing = false;
 const FIXED_ENDPOINTS = {
     lmStudioEndpoint: DEFAULT_CONFIG.lmStudioEndpoint,
     perplexicaEndpoint: DEFAULT_CONFIG.perplexicaEndpoint,
 };
+
+function trimTrailingSlash(value: string): string {
+    return value.replace(/\/+$/, '');
+}
+
+function getDirectBackendCandidates(path: string): string[] {
+    if (typeof window === 'undefined') return [];
+    const protocol = window.location.protocol || 'http:';
+    const host = window.location.hostname;
+    const currentPort = window.location.port;
+
+    const candidates: string[] = [];
+
+    // If app is not already served from :3001, try backend directly there.
+    if (currentPort !== '3001') {
+        candidates.push(`${protocol}//${host}:3001/api/lmstudio${path}`);
+        if (protocol === 'https:') {
+            candidates.push(`http://${host}:3001/api/lmstudio${path}`);
+        }
+    }
+
+    return candidates;
+}
+
+async function fetchLMStudioWithFallback(
+    path: string,
+    lmStudioEndpoint: string,
+    init?: RequestInit
+): Promise<Response> {
+    if (!lmStudioProxyMissing) {
+        try {
+            const proxyResponse = await fetch(`${LM_STUDIO_PROXY_BASE}${path}`, init);
+            if (proxyResponse.status !== 404) {
+                return proxyResponse;
+            }
+            lmStudioProxyMissing = true;
+        } catch {
+            // Fall through to direct LM Studio endpoint
+        }
+    }
+
+    // Docker/self-host fallback: call backend directly on same host:3001
+    // when public reverse proxy does not forward /api/lmstudio.
+    const backendCandidates = getDirectBackendCandidates(path);
+    for (const url of backendCandidates) {
+        try {
+            const res = await fetch(url, init);
+            if (res.status !== 404) {
+                return res;
+            }
+        } catch {
+            // try next candidate
+        }
+    }
+
+    const base = trimTrailingSlash(lmStudioEndpoint);
+    // Avoid browser calls from a public origin to private-network LM Studio
+    // (blocked by PNA/CORS in production deployments).
+    if (typeof window !== 'undefined') {
+        const isPublicAppHost =
+            window.location.hostname !== 'localhost' &&
+            window.location.hostname !== '127.0.0.1';
+        const isPrivateTarget =
+            /^https?:\/\/(?:127\.0\.0\.1|localhost|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[0-1])\.)/i.test(base);
+
+        if (isPublicAppHost && isPrivateTarget) {
+            throw new Error('LM Studio proxy route is unavailable and direct private-network access is blocked from this origin.');
+        }
+    }
+
+    return fetch(`${base}${path}`, init);
+}
 
 function withFixedEndpoints(config: AIConfig): AIConfig {
     return {
@@ -79,6 +152,7 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
     const [availableModels, setAvailableModels] = useState<AIModel[]>([]);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
     const [serverModelStates, setServerModelStates] = useState<Map<string, ServerModelState>>(new Map());
+    const serverModelStatesRef = useRef<Map<string, ServerModelState>>(new Map());
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const notifiedModelsRef = useRef<Set<string>>(new Set());
     const lastActivityRef = useRef<number>(Date.now());
@@ -147,8 +221,8 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
     const fetchModels = useCallback(async () => {
         setIsLoadingModels(true);
         try {
-            const response = await fetch(`${LM_STUDIO_PROXY_BASE}/models`);
-            if (!response.ok) throw new Error('Failed to fetch models');
+            const response = await fetchLMStudioWithFallback('/models', config.lmStudioEndpoint);
+            if (!response.ok) throw new Error(`Failed to fetch models (HTTP ${response.status})`);
             const data = await response.json() as { models?: Array<Record<string, unknown>> };
 
             const models: AIModel[] = (data.models || []).map((m: Record<string, unknown>) => {
@@ -164,7 +238,7 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
                     roles.push('reasoning');
                 }
                 
-                const serverState = serverModelStates.get(modelId);
+                const serverState = serverModelStatesRef.current.get(modelId);
                 
                 return {
                     id: modelId,
@@ -195,7 +269,7 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
         } finally {
             setIsLoadingModels(false);
         }
-    }, [config.defaultChatModelId, config.defaultEmbeddingModelId, config.defaultVisionModelId, config.reasoningLevel, serverModelStates]);
+    }, [config.defaultChatModelId, config.defaultEmbeddingModelId, config.defaultVisionModelId, config.lmStudioEndpoint, config.reasoningLevel]);
 
     // Polling for server model status
     useEffect(() => {
@@ -231,6 +305,7 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
                             dismissNotification(`unload-${s.id}`);
                         }
                     });
+                    serverModelStatesRef.current = newStates;
                     setServerModelStates(newStates);
                     
                     // Remove notifications for models no longer in tracking (unloaded)
@@ -313,7 +388,7 @@ export function AIConfigProvider({ children }: { children: ReactNode }) {
             }
 
             // 1. Load on LM Studio
-            const response = await fetch(`${LM_STUDIO_PROXY_BASE}/models/load`, {
+            const response = await fetchLMStudioWithFallback('/models/load', config.lmStudioEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

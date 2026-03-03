@@ -1,14 +1,17 @@
 import './TaskDrawer.css';
 import { useEffect, useState } from 'react';
-import { Loader2, CheckCircle2, AlertCircle, Eye, Globe, Zap, FileSearch } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle, Eye, Globe, Zap, FileSearch, X } from 'lucide-react';
 import type { ToolCall } from '../../types';
 
 interface TaskDrawerProps {
     tasks: ToolCall[];
     isVisible: boolean;
+    title?: string;
+    currentStep?: string;
+    onClose?: () => void;
 }
 
-export function TaskDrawer({ tasks, isVisible }: TaskDrawerProps) {
+export function TaskDrawer({ tasks, isVisible, title = 'Active Tasks', currentStep, onClose }: TaskDrawerProps) {
     const [shouldRender, setShouldRender] = useState(isVisible);
 
     useEffect(() => {
@@ -25,9 +28,22 @@ export function TaskDrawer({ tasks, isVisible }: TaskDrawerProps) {
     return (
         <div className={`bk-task-drawer ${isVisible ? 'bk-task-drawer--visible' : ''}`}>
             <div className="bk-task-drawer__header">
-                <h3 className="bk-task-drawer__title">Active Tasks</h3>
-                <span className="bk-task-drawer__count">{tasks.length}</span>
+                <h3 className="bk-task-drawer__title">{title}</h3>
+                <div className="bk-task-drawer__header-right">
+                    <span className="bk-task-drawer__count">{tasks.length}</span>
+                    {onClose && (
+                        <button className="bk-task-drawer__close" onClick={onClose} aria-label="Close task drawer">
+                            <X size={14} />
+                        </button>
+                    )}
+                </div>
             </div>
+            {currentStep && (
+                <div className="bk-task-drawer__current-step">
+                    <span className="bk-task-drawer__current-step-label">Current Step</span>
+                    <span className="bk-task-drawer__current-step-text">{currentStep}</span>
+                </div>
+            )}
             <div className="bk-task-drawer__list">
                 {tasks.length === 0 ? (
                     <div className="bk-task-drawer__empty">No active tasks</div>

@@ -8,6 +8,7 @@ import { WebSearchResults } from './WebSearchResults';
 import { DeepSearchProgress } from './DeepSearchProgress';
 import { LoadingDots } from '../shared/Spinner';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { copyToClipboardSafe } from '../../utils/clipboard';
 
 interface MessageBubbleProps {
     message: Message;
@@ -29,7 +30,8 @@ export function MessageBubble({ message, onToggleReasoning, onImageClick, onDele
     const [editedValue, setEditedValue] = useState(message.content);
 
     const handleCopy = async () => {
-        await navigator.clipboard.writeText(message.content);
+        const copiedOk = await copyToClipboardSafe(message.content || '');
+        if (!copiedOk) return;
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
@@ -122,7 +124,12 @@ export function MessageBubble({ message, onToggleReasoning, onImageClick, onDele
                                 </div>
                             ) : (
                                 message.isStreaming && !message.content && !message.reasoning
-                                    ? <LoadingDots />
+                                    ? (
+                                        <div className="bk-msg__status">
+                                            <span className="bk-msg__status-text">{message.statusText || 'Working...'}</span>
+                                            <LoadingDots />
+                                        </div>
+                                    )
                                     : <MarkdownRenderer content={message.content} />
                             )}
                         </div>

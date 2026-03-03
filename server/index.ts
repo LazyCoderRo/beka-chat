@@ -22,8 +22,23 @@ const pool = new Pool({
 });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
-const DEFAULT_LM_STUDIO_ENDPOINT = 'http://192.168.1.134:1234/api/v1';
+const LM_STUDIO_ENDPOINT_RAW = process.env.LM_STUDIO_ENDPOINT || 'http://192.168.1.134:1234/api/v1';
 const AVATAR_OPTIONS = Array.from({ length: 12 }, (_, i) => `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${i + 1}`);
+
+function trimTrailingSlash(value: string): string {
+    return value.replace(/\/+$/, '');
+}
+
+function normalizeLMStudioEndpoint(raw: string): string {
+    const base = trimTrailingSlash(raw);
+    if (/\/api\/v1$/i.test(base)) {
+        return base;
+    }
+    return `${base}/api/v1`;
+}
+
+const LM_STUDIO_ENDPOINT = normalizeLMStudioEndpoint(LM_STUDIO_ENDPOINT_RAW);
+console.log(`[CONFIG] LM_STUDIO_ENDPOINT=${LM_STUDIO_ENDPOINT}`);
 
 function pickRandomAvatarUrl(): string {
     return AVATAR_OPTIONS[Math.floor(Math.random() * AVATAR_OPTIONS.length)];
@@ -57,7 +72,7 @@ async function getSetting(key: string, defaultValue: any) {
 }
 
 async function unloadModelOnLMStudio(modelId: string) {
-    const endpoint = DEFAULT_LM_STUDIO_ENDPOINT;
+    const endpoint = LM_STUDIO_ENDPOINT;
     try {
         console.log(`[IDLE] Auto-unloading idle model: ${modelId}`);
         const response = await fetch(`${endpoint}/models/unload`, {
@@ -97,7 +112,7 @@ setInterval(async () => {
 
 // Sync with LM Studio to track any "orphan" loaded models
 async function syncLoadedModels() {
-    const endpoint = DEFAULT_LM_STUDIO_ENDPOINT;
+    const endpoint = LM_STUDIO_ENDPOINT;
     const defaultIdle = await getSetting('defaultIdleTimeMinutes', 60);
     
     try {
@@ -312,10 +327,142 @@ app.post('/api/admin/settings', authenticateToken, async (req: any, res) => {
     }
 });
 
+app.get('/api/admin/users', authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access Denied' });
+
+    try {
+        const result = await pool.query(
+            `SELECT
+                u.id,
+                u.name,
+                u.email,
+                u.role,
+                u.avatarurl as "avatarUrl",
+                u.createdat as "createdAt",
+                (
+                    SELECT COUNT(*)
+                    FROM sessions s
+                    WHERE s.user_id = u.id
+                )::int as "sessionCount"
+            FROM users u
+            ORDER BY u.createdat DESC`
+        );
+        res.json({ users: result.rows });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/admin/users/:id/sessions', authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access Denied' });
+
+    const targetId = parseInt(req.params.id, 10);
+    if (!targetId || Number.isNaN(targetId)) {
+        return res.status(400).json({ error: 'Invalid user id' });
+    }
+
+    try {
+        const result = await pool.query(
+            'SELECT id, data, updated_at FROM sessions WHERE user_id = $1 ORDER BY updated_at DESC',
+            [targetId]
+        );
+
+        const sessions = result.rows.map((row: any) => {
+            const data = row.data || {};
+            const messages = Array.isArray(data.messages) ? data.messages : [];
+            return {
+                id: row.id,
+                title: data.title || 'Untitled Chat',
+                preview: data.preview || '',
+                updatedAt: data.updatedAt || row.updated_at,
+                messageCount: messages.length
+            };
+        });
+
+        res.json({ sessions });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/admin/users/:id/sessions/:sessionId', authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access Denied' });
+
+    const targetId = parseInt(req.params.id, 10);
+    if (!targetId || Number.isNaN(targetId)) {
+        return res.status(400).json({ error: 'Invalid user id' });
+    }
+
+    try {
+        const result = await pool.query(
+            'SELECT id, data FROM sessions WHERE user_id = $1 AND id = $2 LIMIT 1',
+            [targetId, req.params.sessionId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Session not found' });
+        }
+
+        const row = result.rows[0];
+        res.json({ session: { ...row.data, id: row.id } });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.put('/api/admin/users/:id/role', authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access Denied' });
+
+    const targetId = parseInt(req.params.id, 10);
+    const { role } = req.body || {};
+
+    if (!targetId || Number.isNaN(targetId)) {
+        return res.status(400).json({ error: 'Invalid user id' });
+    }
+    if (role !== 'admin' && role !== 'user') {
+        return res.status(400).json({ error: 'Invalid role' });
+    }
+
+    try {
+        const updated = await pool.query(
+            'UPDATE users SET role = $1 WHERE id = $2 RETURNING id, name, email, role, avatarurl as "avatarUrl", createdat as "createdAt"',
+            [role, targetId]
+        );
+        if (updated.rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json({ user: updated.rows[0] });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/admin/users/:id', authenticateToken, async (req: any, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access Denied' });
+
+    const targetId = parseInt(req.params.id, 10);
+    if (!targetId || Number.isNaN(targetId)) {
+        return res.status(400).json({ error: 'Invalid user id' });
+    }
+    if (targetId === req.user.id) {
+        return res.status(400).json({ error: 'You cannot delete your own account' });
+    }
+
+    try {
+        const deleted = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id', [targetId]);
+        if (deleted.rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json({ success: true });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ─── LM Studio Proxy Endpoints ──────────────────────────────────────────────
 app.get('/api/lmstudio/models', async (req, res) => {
     try {
-        const endpoint = DEFAULT_LM_STUDIO_ENDPOINT;
+        const endpoint = LM_STUDIO_ENDPOINT;
         const upstream = await fetch(`${endpoint}/models`);
         const contentType = upstream.headers.get('content-type') || 'application/json';
         const text = await upstream.text();
@@ -327,7 +474,7 @@ app.get('/api/lmstudio/models', async (req, res) => {
 
 app.post('/api/lmstudio/models/load', async (req, res) => {
     try {
-        const endpoint = DEFAULT_LM_STUDIO_ENDPOINT;
+        const endpoint = LM_STUDIO_ENDPOINT;
         const upstream = await fetch(`${endpoint}/models/load`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -343,7 +490,7 @@ app.post('/api/lmstudio/models/load', async (req, res) => {
 
 app.post('/api/lmstudio/chat', async (req, res) => {
     try {
-        const endpoint = DEFAULT_LM_STUDIO_ENDPOINT;
+        const endpoint = LM_STUDIO_ENDPOINT;
         const upstream = await fetch(`${endpoint}/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -381,7 +528,11 @@ app.post('/api/sessions', authenticateToken, async (req: any, res) => {
     try {
         const session = req.body;
         await pool.query(
-            'INSERT INTO sessions (id, user_id, data, updated_at) VALUES ($1, $2, $3, NOW())',
+            `INSERT INTO sessions (id, user_id, data, updated_at)
+             VALUES ($1, $2, $3, NOW())
+             ON CONFLICT (id) DO UPDATE
+             SET data = EXCLUDED.data, updated_at = NOW()
+             WHERE sessions.user_id = EXCLUDED.user_id`,
             [session.id, req.user.id, session]
         );
         res.json({ success: true });
@@ -393,10 +544,13 @@ app.post('/api/sessions', authenticateToken, async (req: any, res) => {
 app.put('/api/sessions/:id', authenticateToken, async (req: any, res) => {
     try {
         const session = req.body;
-        await pool.query(
+        const result = await pool.query(
             'UPDATE sessions SET data = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3',
             [session, req.params.id, req.user.id]
         );
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Session not found' });
+        }
         res.json({ success: true });
     } catch (err: any) {
         res.status(500).json({ error: err.message });

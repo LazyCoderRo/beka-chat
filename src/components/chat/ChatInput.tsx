@@ -1,6 +1,6 @@
 import './ChatInput.css';
 import { useRef, useState, type KeyboardEvent, type ChangeEvent } from 'react';
-import { Send, Paperclip, Globe, Zap, X, Trash2, Mic, Square } from 'lucide-react';
+import { Send, Paperclip, Globe, Zap, X, Trash2, Square, Copy, Check } from 'lucide-react';
 import { FilePreview } from './FilePreview';
 import { ModelSelector } from '../layout/ModelSelector';
 import { ReasoningSelector } from '../layout/ReasoningSelector';
@@ -59,14 +59,29 @@ interface ChatInputProps {
     onSend: (content: string, attachments: FileAttachment[], searchMode: SearchMode) => void;
     onStop?: () => void;
     onClear?: () => void;
+    onCopySessionMarkdown?: () => void;
     isGenerating?: boolean;
     disabled?: boolean;
     messages?: Message[];
     promptSuggestions?: MessageActionSuggestion[];
+    autoSearchHint?: { mode: SearchMode; reason: string } | null;
+    isSessionCopied?: boolean;
     onSelectSuggestion?: (suggestion: MessageActionSuggestion) => void;
 }
 
-export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disabled, messages = [], promptSuggestions = [], onSelectSuggestion }: ChatInputProps) {
+export function ChatInput({
+    onSend,
+    onStop,
+    onClear,
+    onCopySessionMarkdown,
+    isGenerating = false,
+    disabled,
+    messages = [],
+    promptSuggestions = [],
+    autoSearchHint = null,
+    isSessionCopied = false,
+    onSelectSuggestion
+}: ChatInputProps) {
     const { config, availableModels } = useAIConfig();
     const [value, setValue] = useState('');
     const [attachments, setAttachments] = useState<FileAttachment[]>([]);
@@ -74,8 +89,6 @@ export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disab
     const [isDragging, setIsDragging] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
-
-    const [autoSend, setAutoSend] = useState(true);
 
     const [historyIndex, setHistoryIndex] = useState(-1);
     const [historyValue, setHistoryValue] = useState('');
@@ -235,10 +248,21 @@ export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disab
                 <div className="bk-chat-input__active-mode-row">
                     <div className={`bk-chat-input__mode-badge bk-chat-input__mode-badge--${searchMode}`}>
                         {searchMode === 'web' ? <Globe size={11} /> : <Zap size={11} />}
-                        <span>{searchMode === 'web' ? 'Web Search' : 'Deep Search'}</span>
+                        <span>{searchMode === 'web' ? 'Web Search' : 'Deep Research'}</span>
                         <button onClick={() => setSearchMode('none')} aria-label="Clear search mode">
                             <X size={11} />
                         </button>
+                    </div>
+                </div>
+            )}
+            {autoSearchHint && (
+                <div className="bk-chat-input__active-mode-row">
+                    <div
+                        className={`bk-chat-input__mode-badge bk-chat-input__mode-badge--auto bk-chat-input__mode-badge--${autoSearchHint.mode}`}
+                        title={`Reason: ${autoSearchHint.reason}`}
+                    >
+                        {autoSearchHint.mode === 'web' ? <Globe size={11} /> : <Zap size={11} />}
+                        <span>Auto Search inferred: {autoSearchHint.mode === 'web' ? 'Web' : 'Deep Research'}</span>
                     </div>
                 </div>
             )}
@@ -334,41 +358,16 @@ export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disab
                             <span className="bk-chat-input__tool-label">Web</span>
                         </button>
 
-                        {/* Deep search toggle */}
+                        {/* Deep research toggle */}
                         <button
                             className={`bk-chat-input__tool-btn bk-chat-input__tool-btn--deep ${searchMode === 'deep' ? 'active' : ''}`}
                             onClick={() => toggleSearch('deep')}
-                            title="Deep search"
+                            title="Deep research"
                             disabled={disabled}
                         >
                             <Zap size={17} />
                             <span className="bk-chat-input__tool-label">Deep</span>
                         </button>
-
-                        <div className="bk-chat-input__divider" />
-
-                        {/* Mic button - disabled */}
-                        <button
-                            className="bk-chat-input__tool-btn bk-chat-input__record-btn"
-                            title="Voice recording disabled"
-                            disabled={true}
-                        >
-                            <Mic size={17} />
-                            <span className="bk-chat-input__tool-label">Record</span>
-                        </button>
-
-                        <div className="bk-chat-input__divider" />
-
-                        {/* Auto-send Checkbox */}
-                        <label className="bk-chat-input__auto-send bk-chat-input__auto-send--mobile-hidden">
-                            <input
-                                type="checkbox"
-                                className="bk-chat-input__checkbox"
-                                checked={autoSend}
-                                onChange={(e) => setAutoSend(e.target.checked)}
-                            />
-                            Auto-send
-                        </label>
 
                     </div>
 
@@ -384,14 +383,25 @@ export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disab
 
                         {/* Send / Stop button */}
                         {isGenerating ? (
-                            <button
-                                className="bk-chat-input__send bk-chat-input__send--active bk-chat-input__send--stop"
-                                onClick={onStop}
-                                aria-label="Stop generation"
-                                title="Stop generation"
-                            >
-                                <Square size={14} />
-                            </button>
+                            <>
+                                <button
+                                    className="bk-chat-input__send bk-chat-input__send--active bk-chat-input__send--stop"
+                                    onClick={onStop}
+                                    aria-label="Stop generation"
+                                    title="Stop generation"
+                                >
+                                    <Square size={14} />
+                                </button>
+                                <button
+                                    className="bk-chat-input__send bk-chat-input__send--copy"
+                                    onClick={onCopySessionMarkdown}
+                                    disabled={!messages || messages.length === 0}
+                                    title="Copy session as markdown"
+                                    aria-label="Copy session as markdown"
+                                >
+                                    {isSessionCopied ? <Check size={14} /> : <Copy size={14} />}
+                                </button>
+                            </>
                         ) : (
                             <>
                                 <button
@@ -401,6 +411,15 @@ export function ChatInput({ onSend, onStop, onClear, isGenerating = false, disab
                                     aria-label="Send message"
                                 >
                                     <Send size={16} />
+                                </button>
+                                <button
+                                    className="bk-chat-input__send bk-chat-input__send--copy"
+                                    onClick={onCopySessionMarkdown}
+                                    disabled={!messages || messages.length === 0}
+                                    title="Copy session as markdown"
+                                    aria-label="Copy session as markdown"
+                                >
+                                    {isSessionCopied ? <Check size={14} /> : <Copy size={14} />}
                                 </button>
                                 <button
                                     className="bk-chat-input__send bk-chat-input__send--clear"

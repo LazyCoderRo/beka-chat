@@ -414,7 +414,26 @@ export async function generateNextPromptSuggestionsWithModel(
             }
         }
 
-        return [];
+        // Fallback: parse plain-text bullets/lines when model ignored JSON format.
+        const lines = cleaned
+            .split('\n')
+            .map(line => line.replace(/^\s*[-*•\d.)]+\s*/, '').trim())
+            .filter(line => line.length >= 6 && line.length <= 160)
+            .filter(line => !/^(return|json|format|example)/i.test(line));
+
+        const unique = [...new Set(lines)];
+        return unique.slice(0, 3).map(label => ({ label }));
+    };
+
+    const toActionSuggestions = (suggestions: Array<{ label: string; description?: string }>) => {
+        return suggestions.slice(0, 3).map((s, i) => ({
+            id: `rec-toolcall-${Date.now()}-${i}`,
+            label: s.label,
+            description: s.description || s.label,
+            query: s.label,
+            searchMode: 'none' as const,
+            type: 'prompt' as const
+        }));
     };
 
     try {
@@ -461,18 +480,10 @@ Generate 3 follow-up prompts as JSON array:`;
 
         const suggestions = parseSuggestions(content);
         if (suggestions.length === 0) {
-            console.warn('Could not parse suggestions from model response');
             return [];
         }
 
-        return suggestions.slice(0, 3).map((s, i) => ({
-            id: `rec-toolcall-${Date.now()}-${i}`,
-            label: s.label,
-            description: s.description || s.label,
-            query: s.label,
-            searchMode: 'none',
-            type: 'prompt'
-        }));
+        return toActionSuggestions(suggestions);
     } catch (error) {
         console.warn('Error generating suggestions with tool calling model:', error);
         return [];

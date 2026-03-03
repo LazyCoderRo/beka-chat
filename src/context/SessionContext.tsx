@@ -79,6 +79,32 @@ function generateId() {
     return 'session-' + Date.now() + Math.random().toString(36).substr(2, 9);
 }
 
+// On app reload, any in-flight generation from a previous runtime is stale.
+// Normalize persisted sessions so UI does not show phantom running operations.
+function normalizeSessionFromStorage(session: ChatSession): ChatSession {
+    return {
+        ...session,
+        messages: session.messages.map(msg => ({
+            ...msg,
+            isStreaming: false,
+            toolCalls: msg.toolCalls?.map(tc => (
+                tc.status === 'running' || tc.status === 'pending'
+                    ? {
+                        ...tc,
+                        status: 'error',
+                        progress: 100,
+                        label: tc.label.includes('interrupted') ? tc.label : `${tc.label} (interrupted after reload)`,
+                        completedAt: new Date().toISOString(),
+                        duration: tc.startedAt
+                            ? Math.max(0, Date.now() - new Date(tc.startedAt).getTime())
+                            : tc.duration
+                    }
+                    : tc
+            ))
+        }))
+    };
+}
+
 // Strip large textContent from attachments before saving to database
 function stripTextContentForDB(session: ChatSession): ChatSession {
     return {
@@ -117,11 +143,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             .then(data => {
                 if (data.sessions) {
                     setSessions(prev => {
-                        const remoteSessions = data.sessions as ChatSession[];
+                        const remoteSessions = (data.sessions as ChatSession[]).map(normalizeSessionFromStorage);
                         if (prev.length === 0) return remoteSessions;
 
                         const remoteIds = new Set(remoteSessions.map(session => session.id));
-                        const localOnlySessions = prev.filter(session => !remoteIds.has(session.id));
+                        const localOnlySessions = prev
+                            .filter(session => !remoteIds.has(session.id))
+                            .map(normalizeSessionFromStorage);
                         return [...remoteSessions, ...localOnlySessions];
                     });
                 }
@@ -141,18 +169,32 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (!isAuthenticated || !activeSession || !isLoaded) return;
         const token = localStorage.getItem('token');
         const sessionForDB = stripTextContentForDB(activeSession);
-        fetch(`/api/sessions/${activeSession.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify(sessionForDB)
-        }).catch(() => {
-            // Ignore for now. If it's a new session, it might need POST.
-            fetch(`/api/sessions`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify(sessionForDB)
-            }).catch(console.error);
-        });
+        void (async () => {
+            try {
+                const updateResponse = await fetch(`/api/sessions/${activeSession.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify(sessionForDB)
+                });
+
+                if (updateResponse.ok) return;
+                if (updateResponse.status !== 404) {
+                    console.error('Failed to update session:', await updateResponse.text());
+                    return;
+                }
+
+                const createResponse = await fetch(`/api/sessions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify(sessionForDB)
+                });
+                if (!createResponse.ok) {
+                    console.error('Failed to create session after missing update:', await createResponse.text());
+                }
+            } catch (error) {
+                console.error('Failed to sync session:', error);
+            }
+        })();
     }, [activeSession, isAuthenticated, isLoaded]);
 
 
