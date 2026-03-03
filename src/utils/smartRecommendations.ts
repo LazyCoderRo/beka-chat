@@ -1,5 +1,12 @@
 import type { FileAttachment, Message, MessageActionSuggestion } from '../types';
 
+/**
+ * Check if a model ID is a Qwen model
+ */
+function isQwenModel(modelId: string): boolean {
+    return /qwen|qwq/i.test(modelId);
+}
+
 export interface ToolRecommendation {
     id: string;
     toolName: 'vision_analysis' | 'webpage_fetch' | 'web_search' | 'deep_search' | 'context_summarization' | 'next_prompt';
@@ -444,6 +451,8 @@ Each suggestion should:
 2. Explore different angles (deeper analysis, practical application, related topics, examples, etc.)
 3. Be actionable and specific
 
+Do not overthink. Generate suggestions quickly based on natural next steps in the conversation.
+
 Return ONLY a JSON array with this format (no markdown, no code blocks):
 [
   {"label": "Question or suggestion here", "description": "Brief explanation why this is relevant"},
@@ -458,16 +467,29 @@ Assistant responded: "${aiResponse.slice(0, 500)}${aiResponse.length > 500 ? '..
 Generate 3 follow-up prompts as JSON array:`;
 
         const chatUrl = `${lmStudioEndpoint}/chat`;
+        const requestBody: Record<string, any> = {
+            model: toolCallingModelId,
+            input: userInput,
+            stream: false,
+            system_prompt: systemPrompt,
+        };
+
+        // Add Qwen sampling parameters for tool mode (suggestion generation)
+        if (isQwenModel(toolCallingModelId)) {
+            // Tool calling/instruct mode parameters
+            requestBody.temperature = 1.0;
+            requestBody.top_p = 1.0;
+            requestBody.top_k = 40;
+            requestBody.min_p = 0.0;
+            requestBody.presence_penalty = 2.0;
+            requestBody.repeat_penalty = 1.0;
+        }
+
         const response = await fetch(chatUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             signal,
-            body: JSON.stringify({
-                model: toolCallingModelId,
-                input: userInput,
-                stream: false,
-                system_prompt: systemPrompt,
-            })
+            body: JSON.stringify(requestBody)
         });
 
         if (!response.ok) {

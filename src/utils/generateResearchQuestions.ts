@@ -7,6 +7,13 @@ interface GenerateQuestionsOptions {
     proxyBase?: string;
 }
 
+/**
+ * Check if a model ID is a Qwen model
+ */
+function isQwenModel(modelId: string): boolean {
+    return /qwen|qwq/i.test(modelId);
+}
+
 export async function generateResearchQuestions(
     options: GenerateQuestionsOptions
 ): Promise<ResearchQuestion[]> {
@@ -44,16 +51,29 @@ Example format:
 ]`;
 
     try {
+        const requestBody: Record<string, any> = {
+            model: modelId,
+            input: prompt,
+            stream: false,
+            system_prompt: 'You are a JSON API. Return only valid JSON arrays with no additional text or markdown. Do not overthink—generate output quickly and directly.'
+        };
+
+        // Add Qwen sampling parameters for tool mode (JSON API)
+        if (isQwenModel(modelId)) {
+            // Tool calling/instruct mode parameters
+            requestBody.temperature = 1.0;
+            requestBody.top_p = 1.0;
+            requestBody.top_k = 40;
+            requestBody.min_p = 0.0;
+            requestBody.presence_penalty = 2.0;
+            requestBody.repeat_penalty = 1.0;
+        }
+
         const response = await fetch(`${proxyBase}/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             signal,
-            body: JSON.stringify({
-                model: modelId,
-                input: prompt,
-                stream: false,
-                system_prompt: 'You are a JSON API. Return only valid JSON arrays with no additional text or markdown.'
-            })
+            body: JSON.stringify(requestBody)
         });
 
         if (!response.ok) {

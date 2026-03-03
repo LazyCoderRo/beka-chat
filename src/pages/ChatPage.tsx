@@ -138,6 +138,49 @@ function normalizeUrl(url: string): string {
     return normalized;
 }
 
+/**
+ * Check if a model ID is a Qwen model
+ */
+function isQwenModel(modelId: string): boolean {
+    return /qwen|qwq/i.test(modelId);
+}
+
+/**
+ * Get Qwen sampling parameters based on mode
+ * For tool calling/instruction mode: temperature=1.0, top_p=1.0, top_k=40, min_p=0.0, presence_penalty=2.0, repetition_penalty=1.0
+ * For thinking mode (general chat): temperature=1.0, top_p=0.95, top_k=20, min_p=0.0, presence_penalty=1.5, repetition_penalty=1.0
+ */
+function getQwenSamplingParams(isToolMode: boolean): {
+    temperature?: number;
+    top_p?: number;
+    top_k?: number;
+    min_p?: number;
+    presence_penalty?: number;
+    repeat_penalty?: number;
+} {
+    if (isToolMode) {
+        // Instruct (non-thinking) mode for tool calls
+        return {
+            temperature: 1.0,
+            top_p: 1.0,
+            top_k: 40,
+            min_p: 0.0,
+            presence_penalty: 2.0,
+            repeat_penalty: 1.0
+        };
+    } else {
+        // Thinking mode for general chat
+        return {
+            temperature: 1.0,
+            top_p: 0.95,
+            top_k: 20,
+            min_p: 0.0,
+            presence_penalty: 1.5,
+            repeat_penalty: 1.0
+        };
+    }
+}
+
 function extractUrls(text: string): string[] {
     const matches = text.match(URL_REGEX) ?? [];
     const normalized = matches
@@ -480,21 +523,31 @@ Rules:
 - For image analysis requests with image context, choose analyze_image.
 - Otherwise choose none.
 
+Do not overthink. Make the decision quickly based on the clearest match.
+
 Return ONLY strict JSON object:
 {"tool":"web_search"}
 or {"tool":"none"}`;
 
     const input = `Conversation context:\n${recent || '[none]'}\n\nCurrent user message:\n${userContent}\n\nReturn JSON now.`;
 
+    const requestBody: Record<string, any> = {
+        model: modelId,
+        input,
+        stream: false,
+        system_prompt: systemPrompt
+    };
+
+    // Add Qwen sampling parameters for tool calling mode
+    if (isQwenModel(modelId)) {
+        const qwenParams = getQwenSamplingParams(true); // true = tool mode (instruct)
+        Object.assign(requestBody, qwenParams);
+    }
+
     const response = await fetch(`${LM_STUDIO_PROXY_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: modelId,
-            input,
-            stream: false,
-            system_prompt: systemPrompt
-        })
+        body: JSON.stringify(requestBody)
     });
 
     if (!response.ok) return null;
@@ -1427,13 +1480,25 @@ export function ChatPage() {
                 stream: boolean;
                 system_prompt: string;
                 reasoning?: 'low' | 'medium' | 'high';
+                temperature?: number;
+                top_p?: number;
+                top_k?: number;
+                min_p?: number;
+                presence_penalty?: number;
+                repeat_penalty?: number;
             } = {
                 model: resolvedChatModelId || 'default',
                 input: synthesisPrompt,
                 stream: false,
-                system_prompt: `You are a precise assistant. External tool (${toolModelName}) provided evidence. Produce the final user-facing answer grounded only in that evidence.`,
+                system_prompt: `You are a precise assistant. External tool (${toolModelName}) provided evidence. Produce the final user-facing answer grounded only in that evidence. Do not overthink—answer directly based on the evidence provided without speculation or excessive caveats.`,
                 reasoning: config.reasoningLevel && config.reasoningLevel !== 'off' ? config.reasoningLevel : undefined,
             };
+
+            // Add Qwen sampling parameters for tool mode (synthesis)
+            if (isQwenModel(synthesisBody.model)) {
+                const qwenParams = getQwenSamplingParams(true); // true = tool mode (instruct)
+                Object.assign(synthesisBody, qwenParams);
+            }
 
             if (synthesisBody.reasoning && localStorage.getItem(`no-reasoning-${synthesisBody.model}`)) {
                 delete synthesisBody.reasoning;
@@ -2291,6 +2356,8 @@ ${hasImages ? `IMPORTANT: The user has uploaded ${imageCount} image${imageCount 
 ${hasTextDocs ? `IMPORTANT: The user has uploaded ${textDocCount} text document${textDocCount > 1 ? 's' : ''} (${textDocNames}). The document content is already available to you - analyze it directly based on the user's request.` : ''}
 You have access to a tool 'analyze_image(prompt)'. 
 If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("your prompt here")
+
+IMPORTANT: Do not overthink. Provide direct, concise answers. Avoid excessive elaboration or circular reasoning. When you have enough information, respond immediately without dwelling on edge cases or uncertainties.
 `.trim();
 
             // Prepare input with text documents content if present
@@ -2348,6 +2415,12 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                 system_prompt: string;
                 reasoning?: 'low' | 'medium' | 'high';
                 previous_response_id?: string;
+                temperature?: number;
+                top_p?: number;
+                top_k?: number;
+                min_p?: number;
+                presence_penalty?: number;
+                repeat_penalty?: number;
             } = {
                 model: resolvedChatModelId || 'default',
                 input: inputContent,
@@ -2355,6 +2428,13 @@ If you need to analyze an image, respond with ONLY: TOOL_CALL: analyze_image("yo
                 system_prompt: toolSystemInst,
                 reasoning: config.reasoningLevel && config.reasoningLevel !== 'off' ? config.reasoningLevel : undefined,
             };
+
+            // Add Qwen sampling parameters for thinking mode (normal chat)
+            if (isQwenModel(resolvedChatModelId)) {
+                const qwenParams = getQwenSamplingParams(false); // false = thinking mode
+                Object.assign(body, qwenParams);
+            }
+
             setStreamingStatus('Generating response...');
 
             if (previous_response_id) body.previous_response_id = previous_response_id;
