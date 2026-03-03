@@ -147,15 +147,15 @@ function isQwenModel(modelId: string): boolean {
 
 /**
  * Get Qwen sampling parameters based on mode
- * For tool calling/instruction mode: temperature=1.0, top_p=1.0, top_k=40, min_p=0.0, presence_penalty=2.0, repetition_penalty=1.0
- * For thinking mode (general chat): temperature=1.0, top_p=0.95, top_k=20, min_p=0.0, presence_penalty=1.5, repetition_penalty=1.0
+ * Only returns parameters supported by LM Studio API
+ * For tool calling/instruction mode: temperature=1.0, top_p=1.0, top_k=40, min_p=0.0, repeat_penalty=1.0
+ * For thinking mode (general chat): temperature=1.0, top_p=0.95, top_k=20, min_p=0.0, repeat_penalty=1.0
  */
 function getQwenSamplingParams(isToolMode: boolean): {
     temperature?: number;
     top_p?: number;
     top_k?: number;
     min_p?: number;
-    presence_penalty?: number;
     repeat_penalty?: number;
 } {
     if (isToolMode) {
@@ -165,7 +165,6 @@ function getQwenSamplingParams(isToolMode: boolean): {
             top_p: 1.0,
             top_k: 40,
             min_p: 0.0,
-            presence_penalty: 2.0,
             repeat_penalty: 1.0
         };
     } else {
@@ -175,7 +174,6 @@ function getQwenSamplingParams(isToolMode: boolean): {
             top_p: 0.95,
             top_k: 20,
             min_p: 0.0,
-            presence_penalty: 1.5,
             repeat_penalty: 1.0
         };
     }
@@ -1484,7 +1482,6 @@ export function ChatPage() {
                 top_p?: number;
                 top_k?: number;
                 min_p?: number;
-                presence_penalty?: number;
                 repeat_penalty?: number;
             } = {
                 model: resolvedChatModelId || 'default',
@@ -2419,7 +2416,6 @@ IMPORTANT: Do not overthink. Provide direct, concise answers. Avoid excessive el
                 top_p?: number;
                 top_k?: number;
                 min_p?: number;
-                presence_penalty?: number;
                 repeat_penalty?: number;
             } = {
                 model: resolvedChatModelId || 'default',

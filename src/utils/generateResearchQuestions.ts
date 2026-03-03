@@ -60,12 +60,11 @@ Example format:
 
         // Add Qwen sampling parameters for tool mode (JSON API)
         if (isQwenModel(modelId)) {
-            // Tool calling/instruct mode parameters
+            // Tool calling/instruct mode parameters - only supported LM Studio params
             requestBody.temperature = 1.0;
             requestBody.top_p = 1.0;
             requestBody.top_k = 40;
             requestBody.min_p = 0.0;
-            requestBody.presence_penalty = 2.0;
             requestBody.repeat_penalty = 1.0;
         }
 
