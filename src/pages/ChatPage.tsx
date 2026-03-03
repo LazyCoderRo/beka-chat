@@ -655,28 +655,37 @@ export function ChatPage() {
 
         try {
             const controller = new AbortController();
-            // 30s timeout for questions generation - use reason for debugging
+            // Short timeout (10s) for questions generation - fail gracefully
             const timeoutId = window.setTimeout(() => {
-                controller.abort(new DOMException('Research questions generation timeout', 'TimeoutError'));
-            }, 30000);
+                controller.abort();
+            }, 10000);
 
-            // Use tool calling model for research questions - find loaded tool model or use default
-            const toolModel = availableModels.find(m => m.id === config.defaultToolCallingModelId && m.isLoaded);
-            const modelId = toolModel?.id || config.defaultToolCallingModelId;
+            let questions: ResearchQuestion[] = [];
 
-            const questions = await generateResearchQuestions({
-                topic,
-                modelId,
-                signal: controller.signal,
-                proxyBase: '/api/lmstudio'
-            });
+            try {
+                // Try to generate questions using tool model
+                const toolModel = availableModels.find(m => m.id === config.defaultToolCallingModelId);
+                if (toolModel) {
+                    questions = await generateResearchQuestions({
+                        topic,
+                        modelId: toolModel.id,
+                        signal: controller.signal,
+                        proxyBase: '/api/lmstudio'
+                    });
+                }
+            } catch (err) {
+                // Silently fail - will use defaults below
+                console.debug('Questions generation failed, using defaults:', err);
+            } finally {
+                window.clearTimeout(timeoutId);
+            }
 
-            window.clearTimeout(timeoutId);
-            
-            setDeepResearchQuestions(questions.length > 0 ? questions : getDefaultQuestions(topic));
+            // Use generated questions if available, otherwise use defaults
+            const finalQuestions = questions.length > 0 ? questions : getDefaultQuestions(topic);
+            setDeepResearchQuestions(finalQuestions);
             setDeepResearchQuestionsOpen(true);
         } catch (error) {
-            console.error('Error generating research questions:', error);
+            console.error('Error initiating deep research:', error);
             setDeepResearchQuestions(getDefaultQuestions(topic));
             setDeepResearchQuestionsOpen(true);
         } finally {
