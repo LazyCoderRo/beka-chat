@@ -655,11 +655,18 @@ export function ChatPage() {
 
         try {
             const controller = new AbortController();
-            const timeoutId = window.setTimeout(() => controller.abort(), 30000); // 30s timeout for questions generation
+            // 30s timeout for questions generation - use reason for debugging
+            const timeoutId = window.setTimeout(() => {
+                controller.abort(new DOMException('Research questions generation timeout', 'TimeoutError'));
+            }, 30000);
+
+            // Use tool calling model for research questions - find loaded tool model or use default
+            const toolModel = availableModels.find(m => m.id === config.defaultToolCallingModelId && m.isLoaded);
+            const modelId = toolModel?.id || config.defaultToolCallingModelId;
 
             const questions = await generateResearchQuestions({
                 topic,
-                modelId: availableModels.find(m => m.isLoaded)?.id || config.defaultChatModelId,
+                modelId,
                 signal: controller.signal,
                 proxyBase: '/api/lmstudio'
             });
